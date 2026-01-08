@@ -1,0 +1,5 @@
+{
+  "name": "Absensi Guru SMPN 3 Pacet",
+  "description": "Aplikasi absensi kehadiran guru berbasis web dan mobile-friendly yang dirancang khusus untuk SMPN 3 Pacet dengan peran Admin, Guru, dan Ketua Kelas.",
+  "requestFramePermissions": []
+}
