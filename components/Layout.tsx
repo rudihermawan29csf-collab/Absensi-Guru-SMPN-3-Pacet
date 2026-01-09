@@ -9,7 +9,6 @@ import {
   Menu, 
   School,
   Cloud,
-  RefreshCw,
   CloudOff,
   Database
 } from 'lucide-react';
@@ -22,7 +21,7 @@ interface LayoutProps {
   onRefresh: () => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, lastSync, onRefresh }) => {
+const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, onRefresh }) => {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
 
@@ -52,8 +51,8 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, lastSync, o
               <School className="text-white" size={24} />
             </div>
             <div>
-              <h1 className="font-bold text-sm tracking-tight leading-none">SIAP GURU</h1>
-              <p className="text-[10px] text-slate-400 mt-1 font-semibold uppercase tracking-widest">SMPN 3 PACET</p>
+              <h1 className="font-bold text-[10px] tracking-tight leading-none uppercase text-slate-400">Kehadiran Guru</h1>
+              <p className="text-xs text-white mt-1 font-black uppercase tracking-wider">SMPN 3 PACET</p>
             </div>
           </div>
           

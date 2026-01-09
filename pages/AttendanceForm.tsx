@@ -122,7 +122,7 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
       alert('Laporan berhasil disimpan ke Cloud!');
       navigate('/');
     } catch (err: any) {
-      const msg = err.message || "Terjadi kesalahan yang tidak diketahui";
+      const msg = err.message || "Terjadi kesalahan sinkronisasi Spreadsheet";
       setErrorMessage(msg);
       console.error("Submit error detail:", err);
     } finally {
@@ -146,10 +146,10 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
       <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-6">
         <div className="flex items-center gap-6">
           <button onClick={() => navigate('/')} className="w-14 h-14 flex items-center justify-center bg-white rounded-[22px] shadow-lg text-slate-400 hover:text-indigo-600 transition-all border border-slate-50"><ArrowLeft size={24} /></button>
-          <div><h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Input Absensi</h1><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{dayName} • KELAS {user.kelas}</p></div>
+          <div><h1 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Laporan Kehadiran</h1><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{dayName} • KELAS {user.kelas} • SMPN 3 PACET</p></div>
         </div>
         <div className="bg-white px-6 py-4 rounded-[22px] border border-slate-100 flex items-center gap-4 shadow-xl">
-           <Calendar className="text-indigo-600" size={20} /><input type="date" className="outline-none text-[11px] font-black text-slate-800 bg-transparent uppercase" value={date} onChange={(e) => {
+           <Calendar className="text-indigo-600" size={20} /><input type="date" className="outline-none text-[10px] font-black text-slate-800 bg-transparent uppercase italic" value={date} onChange={(e) => {
              setDate(e.target.value);
              lastLoadedRef.current = "";
            }}/>
@@ -160,9 +160,9 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
         <div className="bg-rose-50 border border-rose-100 p-6 rounded-[28px] mb-8 flex items-start gap-4 animate-in slide-in-from-top-4">
            <XCircle className="text-rose-500 shrink-0" size={24} />
            <div>
-              <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Gagal Menyimpan</p>
-              <p className="text-sm font-bold text-rose-900 leading-relaxed">{errorMessage}</p>
-              <p className="text-[9px] text-rose-400 mt-2 font-medium">Saran: Pastikan tabel 'attendance' sudah dibuat di Firebase Console.</p>
+              <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Gagal Sinkronisasi Cloud</p>
+              <p className="text-xs font-bold text-rose-900 leading-relaxed">{errorMessage}</p>
+              <p className="text-[9px] text-rose-400 mt-2 font-black uppercase italic">Pastikan koneksi internet stabil & Spreadsheet Web App Aktif.</p>
            </div>
         </div>
       )}
@@ -170,21 +170,21 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
       {isHoliday ? (
         <div className="bg-white p-24 rounded-[40px] text-center border border-slate-100 shadow-2xl">
            <AlertTriangle className="mx-auto text-amber-400 mb-6" size={80} />
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic">Akses Terkunci</h3>
-           <p className="text-slate-400 font-bold text-sm mt-3 uppercase tracking-widest">Hari ini {todayEvent?.nama}</p>
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic">Input Terkunci</h3>
+           <p className="text-slate-400 font-bold text-xs mt-3 uppercase tracking-widest tracking-widest italic">{todayEvent?.nama || 'HARI INI LIBUR SEKOLAH'}</p>
         </div>
       ) : blocks.length > 0 ? (
         <form onSubmit={handleSubmit} className="space-y-6 pb-24">
            {blocks.map((block, idx) => (
-             <div key={idx} className={`bg-white rounded-[32px] p-8 border border-slate-100 shadow-xl ${block.isAdminControlled ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-500/20' : ''}`}>
+             <div key={idx} className={`bg-white rounded-[40px] p-8 border border-slate-100 shadow-2xl ${block.isAdminControlled ? 'bg-indigo-50/50 border-indigo-100 ring-2 ring-indigo-500/10' : ''}`}>
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
                    <div className="lg:col-span-5">
                       <div className="flex items-center gap-3 mb-4">
-                         <span className="bg-slate-900 text-white px-3 py-1 rounded-lg text-[9px] font-black uppercase">Jam {block.jams.join(', ')}</span>
-                         {block.isAdminControlled && <span className="bg-indigo-600 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-2"><ShieldCheck size={12}/> Admin</span>}
+                         <span className="bg-slate-900 text-white px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest">Jam {block.jams.join(', ')}</span>
+                         {block.isAdminControlled && <span className="bg-indigo-600 text-white px-4 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 italic tracking-widest"><ShieldCheck size={12}/> Admin Control</span>}
                       </div>
-                      <p className="text-[11px] font-black text-indigo-600 uppercase italic tracking-widest">{block.mapel}</p>
-                      <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tighter">{block.nama_guru}</h3>
+                      <p className="text-[10px] font-black text-indigo-600 uppercase italic tracking-[0.2em] mb-1">{block.mapel}</p>
+                      <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tighter leading-tight">{block.nama_guru}</h3>
                    </div>
                    <div className="lg:col-span-7">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
@@ -198,35 +198,36 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
                                nb[idx].status = s as AttendanceStatus; 
                                setBlocks(nb);
                              }} 
-                             className={`py-3.5 rounded-2xl text-[10px] font-black uppercase border transition-all ${getStatusColor(s as AttendanceStatus, block.status === (s as AttendanceStatus))} ${block.isAdminControlled ? 'opacity-50' : ''}`}
+                             className={`py-4 rounded-2xl text-[9px] font-black uppercase border transition-all tracking-widest ${getStatusColor(s as AttendanceStatus, block.status === (s as AttendanceStatus))} ${block.isAdminControlled ? 'opacity-50' : ''}`}
                            >
                              {s}
                            </button>
                          ))}
                       </div>
-                      <select disabled={block.isAdminControlled || isSubmitting} className="w-full bg-slate-50 border border-slate-100 px-5 py-3.5 rounded-2xl text-xs font-bold outline-none" value={block.catatan} onChange={e => {
+                      <select disabled={block.isAdminControlled || isSubmitting} className="w-full bg-slate-50 border border-slate-100 px-6 py-4 rounded-2xl text-[10px] font-black uppercase outline-none focus:bg-white transition-all tracking-widest italic" value={block.catatan} onChange={e => {
                           const nb = [...blocks]; nb[idx].catatan = e.target.value; setBlocks(nb);
                         }}>
-                         {NOTE_CHOICES.map((n: string) => <option key={n} value={n}>{n}</option>)}
+                         {(NOTE_CHOICES as string[]).map((n: string) => <option key={n} value={n}>{n}</option>)}
                       </select>
                    </div>
                 </div>
              </div>
            ))}
-           <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-sm px-6 z-50">
+           <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-lg px-6 z-50">
               <button 
                 type="submit" 
                 disabled={isSubmitting}
-                className={`w-full ${isSubmitting ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'} text-white font-black py-5 rounded-[22px] shadow-2xl flex items-center justify-center gap-4 uppercase tracking-widest text-[11px] transition-all`}
+                className={`w-full ${isSubmitting ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'} text-white font-black py-6 rounded-[32px] shadow-2xl flex items-center justify-center gap-4 uppercase tracking-widest text-[11px] transition-all active:scale-95`}
               >
-                {isSubmitting ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />} 
-                {isSubmitting ? 'Menyimpan...' : 'Simpan Laporan'}
+                {isSubmitting ? <Loader2 size={24} className="animate-spin" /> : <Save size={24} />} 
+                {isSubmitting ? 'MENGIRIM KE CLOUD...' : 'SIMPAN SEMUA LAPORAN'}
               </button>
            </div>
         </form>
       ) : (
-        <div className="bg-white p-24 rounded-[40px] text-center border border-slate-100 shadow-2xl">
-           <h3 className="text-2xl font-black text-slate-900 uppercase italic">Tidak Ada Jadwal</h3>
+        <div className="bg-white p-24 rounded-[40px] text-center border border-slate-100 shadow-2xl italic">
+           <h3 className="text-2xl font-black text-slate-900 uppercase italic">JADWAL KOSONG</h3>
+           <p className="text-slate-400 font-bold text-[10px] mt-3 uppercase tracking-widest italic">Tidak ada agenda mengajar di jam ini</p>
         </div>
       )}
     </div>
