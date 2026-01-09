@@ -1,4 +1,6 @@
+
 import React, { useState, useMemo } from 'react';
+// Fix: Correct path to types.ts in same directory
 import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings } from './types';
 import { 
   CartesianGrid, Tooltip, ResponsiveContainer,

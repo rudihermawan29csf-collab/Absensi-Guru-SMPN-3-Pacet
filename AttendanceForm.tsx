@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from './types';
-import { NOTE_CHOICES, MAPEL_NAME_MAP } from '../constants';
+import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from './pages/types';
+// Fix: Correct path to constants.ts (root)
+import { NOTE_CHOICES, MAPEL_NAME_MAP } from './constants';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Calendar, AlertTriangle, ShieldCheck, Loader2, XCircle } from 'lucide-react';
 
@@ -162,7 +164,7 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
            <div>
               <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Gagal Menyimpan</p>
               <p className="text-sm font-bold text-rose-900 leading-relaxed">{errorMessage}</p>
-              <p className="text-[9px] text-rose-400 mt-2 font-medium">Saran: Pastikan tabel 'attendance' sudah dibuat di Firebase Console.</p>
+              <p className="text-[9px] text-rose-400 mt-2 font-medium">Saran: Pastikan Spreadsheet Web App sudah terpasang dan URL sudah benar.</p>
            </div>
         </div>
       )}
@@ -188,6 +190,7 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
                    </div>
                    <div className="lg:col-span-7">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                         {/* Fix: Explicitly cast and type mapping for AttendanceStatus buttons */}
                          {(Object.values(AttendanceStatus) as string[]).map((s: string) => (
                            <button 
                              key={s} 
@@ -207,7 +210,8 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
                       <select disabled={block.isAdminControlled || isSubmitting} className="w-full bg-slate-50 border border-slate-100 px-5 py-3.5 rounded-2xl text-xs font-bold outline-none" value={block.catatan} onChange={e => {
                           const nb = [...blocks]; nb[idx].catatan = e.target.value; setBlocks(nb);
                         }}>
-                         {NOTE_CHOICES.map((n: string) => <option key={n} value={n}>{n}</option>)}
+                         {/* Fix: Explicit type for n in NOTE_CHOICES mapping */}
+                         {(NOTE_CHOICES as string[]).map((n: string) => <option key={n} value={n}>{n}</option>)}
                       </select>
                    </div>
                 </div>

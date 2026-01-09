@@ -1,2 +1,2 @@
-// File ini sudah tidak digunakan. Aplikasi telah beralih menggunakan Supabase.
+// File ini sudah tidak digunakan. Database beralih ke Google Spreadsheet.
 export {};
