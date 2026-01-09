@@ -1,11 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { AttendanceRecord, AttendanceStatus, Teacher, AppSettings, SchoolEvent, ScheduleEntry } from './types';
-import { CLASSES, CLASS_COLORS, NOTE_CHOICES, MAPEL_NAME_MAP, TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE, TEACHER_COLORS } from '../constants';
+import { CLASSES, CLASS_COLORS, MAPEL_NAME_MAP, TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE, TEACHER_COLORS, PERIODS } from '../constants';
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell
+} from 'recharts';
 import { 
   Users, LayoutGrid, Edit2, Trash2, Calendar, 
   Activity, Settings, ShieldCheck, BookOpen, Plus, Trash, X, 
   AlertTriangle, Save, CheckCircle2, RefreshCw, Sparkles, Loader2,
-  Wifi, WifiOff, Coffee, Clock
+  Wifi, WifiOff, Coffee, Clock, Filter, BarChart3
 } from 'lucide-react';
 import {GoogleGenAI} from "@google/genai";
 import { supabase } from '../supabase';
@@ -22,11 +25,14 @@ interface AdminDashboardProps {
 }
 
 type AdminTab = 'overview' | 'monitoring' | 'permits' | 'agenda' | 'teachers' | 'schedule' | 'settings';
+type TimeFilter = 'harian' | 'mingguan' | 'bulanan' | 'semester';
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
   data, teachers, setTeachers, schedule, setSchedule, settings, setSettings, onSaveAttendance 
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('harian');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1 < 10 ? `0${new Date().getMonth() + 1}` : `${new Date().getMonth() + 1}`);
   const [isRestoring, setIsRestoring] = useState(false);
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -40,7 +46,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newEvent, setNewEvent] = useState<Partial<SchoolEvent>>({ 
     tanggal: new Date().toISOString().split('T')[0], 
     nama: '', 
-    tipe: 'LIBUR' 
+    tipe: 'LIBUR',
+    affected_jams: []
   });
 
   // Permit Form State
@@ -52,8 +59,48 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const isLocalMode = (supabase as any).isLocal;
-  const hasKey = !!process.env.API_KEY;
   const todayStr = new Date().toISOString().split('T')[0];
+
+  // Logic Filtering Data untuk Ikhtisar
+  const filteredRecords = useMemo(() => {
+    const now = new Date();
+    return data.filter(record => {
+      const recordDate = new Date(record.tanggal);
+      if (timeFilter === 'harian') return record.tanggal === todayStr;
+      if (timeFilter === 'mingguan') return (now.getTime() - recordDate.getTime()) <= 7 * 24 * 60 * 60 * 1000;
+      if (timeFilter === 'bulanan') {
+        const monthStr = recordDate.getMonth() + 1 < 10 ? `0${recordDate.getMonth() + 1}` : `${recordDate.getMonth() + 1}`;
+        return monthStr === selectedMonth && recordDate.getFullYear() === now.getFullYear();
+      }
+      return true; // Semester
+    });
+  }, [data, timeFilter, selectedMonth, todayStr]);
+
+  const stats = {
+    hadir: filteredRecords.filter(r => r.status === AttendanceStatus.HADIR).length,
+    izin: filteredRecords.filter(r => r.status === AttendanceStatus.IZIN || r.status === AttendanceStatus.SAKIT).length,
+    alpha: filteredRecords.filter(r => r.status === AttendanceStatus.TIDAK_HADIR).length,
+  };
+
+  // Data untuk Grafik Per Kelas
+  const classChartData = useMemo(() => {
+    return CLASSES.map(cls => ({
+      name: cls.id,
+      Hadir: filteredRecords.filter(r => r.id_kelas === cls.id && r.status === AttendanceStatus.HADIR).length,
+      Izin: filteredRecords.filter(r => r.id_kelas === cls.id && (r.status === AttendanceStatus.IZIN || r.status === AttendanceStatus.SAKIT)).length,
+      Alpha: filteredRecords.filter(r => r.id_kelas === cls.id && r.status === AttendanceStatus.TIDAK_HADIR).length,
+    }));
+  }, [filteredRecords]);
+
+  // Data untuk Grafik Per Guru
+  const teacherChartData = useMemo(() => {
+    return teachers.slice(0, 15).map(t => ({
+      name: t.id,
+      Hadir: filteredRecords.filter(r => r.id_guru === t.id && r.status === AttendanceStatus.HADIR).length,
+      Izin: filteredRecords.filter(r => r.id_guru === t.id && (r.status === AttendanceStatus.IZIN || r.status === AttendanceStatus.SAKIT)).length,
+      Alpha: filteredRecords.filter(r => r.id_guru === t.id && r.status === AttendanceStatus.TIDAK_HADIR).length,
+    }));
+  }, [filteredRecords, teachers]);
 
   const handleGenerateAiInsight = async () => {
     setIsAnalyzing(true);
@@ -61,7 +108,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Berikan ringkasan eksekutif profesional dalam Bahasa Indonesia mengenai data absensi SMPN 3 Pacet hari ini (${todayStr}). Statistik: Hadir ${stats.hadir} jam, Izin/Sakit ${stats.izin} jam, Tanpa Keterangan ${stats.alpha} jam.`,
+        contents: `Berikan ringkasan eksekutif profesional dalam Bahasa Indonesia mengenai data absensi SMPN 3 Pacet periode ${timeFilter} (${todayStr}). Statistik: Hadir ${stats.hadir}, Izin ${stats.izin}, Alpha ${stats.alpha}. Berikan rekomendasi untuk manajemen sekolah.`,
       });
       setAiInsight(response.text || 'Gagal memperoleh analisa cerdas.');
     } catch (err) {
@@ -88,21 +135,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!newEvent.nama || !newEvent.tanggal) return;
     const event = { ...newEvent, id: Date.now().toString() } as SchoolEvent;
     setSettings(prev => ({ ...prev, events: [...(prev.events || []), event] }));
-    setNewEvent({ tanggal: todayStr, nama: '', tipe: 'LIBUR' });
+    setNewEvent({ tanggal: todayStr, nama: '', tipe: 'LIBUR', affected_jams: [] });
   };
 
   const handleRemoveEvent = (id: string) => {
-    setSettings(prev => ({ ...prev, events: prev.events.filter(e => e.id !== id) }));
+    setSettings(prev => ({ ...prev, events: (prev.events || []).filter(e => e.id !== id) }));
   };
 
   const handleApplyPermit = async () => {
     if (!permitForm.teacherId || !permitForm.date) return;
-    
     const d = new Date(permitForm.date);
     const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUM\'AT', 'SABTU'];
     const selectedDay = dayNames[d.getDay()];
-    
-    // Cari jadwal guru tersebut di hari itu
     const teacherSchedule = schedule.filter(s => s.hari === selectedDay && s.kegiatan === 'KBM');
     const records: AttendanceRecord[] = [];
     const teacher = teachers.find(t => t.id === permitForm.teacherId);
@@ -154,15 +198,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const filteredData = useMemo(() => {
-    return data.filter(r => r.tanggal === todayStr);
-  }, [data, todayStr]);
-
-  const stats = {
-    hadir: filteredData.filter(r => r.status === AttendanceStatus.HADIR).length,
-    izin: filteredData.filter(r => r.status === AttendanceStatus.IZIN || r.status === AttendanceStatus.SAKIT).length,
-    alpha: filteredData.filter(r => r.status === AttendanceStatus.TIDAK_HADIR).length,
-  };
+  const semesterMonths = [
+    { v: '01', n: 'Januari' }, { v: '02', n: 'Februari' }, { v: '03', n: 'Maret' }, 
+    { v: '04', n: 'April' }, { v: '05', n: 'Mei' }, { v: '06', n: 'Juni' },
+    { v: '07', n: 'Juli' }, { v: '08', n: 'Agustus' }, { v: '09', n: 'September' }, 
+    { v: '10', n: 'Oktober' }, { v: '11', n: 'November' }, { v: '12', n: 'Desember' }
+  ];
 
   return (
     <div className="space-y-6 pb-20">
@@ -196,20 +237,69 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* OVERVIEW TAB */}
       {activeTab === 'overview' && (
         <div className="space-y-6 animate-in fade-in duration-500">
+           {/* Filters */}
+           <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-[28px] border border-slate-100 shadow-sm">
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                 {(['harian', 'mingguan', 'bulanan', 'semester'] as TimeFilter[]).map(f => (
+                   <button key={f} onClick={() => setTimeFilter(f)} className={`px-5 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${timeFilter === f ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}>{f}</button>
+                 ))}
+              </div>
+              {timeFilter === 'bulanan' && (
+                <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="bg-slate-50 border border-slate-100 px-4 py-2 rounded-xl text-[10px] font-black uppercase outline-none">
+                   {semesterMonths.map(m => <option key={m.v} value={m.v}>{m.n}</option>)}
+                </select>
+              )}
+           </div>
+
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
-                { label: 'Hadir Hari Ini', val: stats.hadir, color: 'emerald', icon: <CheckCircle2 size={24}/> },
+                { label: 'Total Hadir', val: stats.hadir, color: 'emerald', icon: <CheckCircle2 size={24}/> },
                 { label: 'Izin & Sakit', val: stats.izin, color: 'indigo', icon: <ShieldCheck size={24}/> },
                 { label: 'Alpha', val: stats.alpha, color: 'rose', icon: <AlertTriangle size={24}/> }
               ].map((s, i) => (
                 <div key={i} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center gap-5">
                    <div className={`p-4 rounded-2xl bg-${s.color}-50 text-${s.color}-600`}>{s.icon}</div>
                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label} ({timeFilter})</p>
                       <h3 className="text-3xl font-black text-slate-800">{s.val} <span className="text-xs font-normal text-slate-400">Jam</span></h3>
                    </div>
                 </div>
               ))}
+           </div>
+
+           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-2xl">
+                 <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><BarChart3 size={18} className="text-indigo-600"/> Monitoring Per Kelas</h3>
+                 <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                       <BarChart data={classChartData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
+                          <YAxis axisLine={false} tickLine={false} hide />
+                          <Tooltip cursor={{fill: '#f8fafc'}} />
+                          <Bar dataKey="Hadir" fill="#10b981" radius={[4,4,0,0]} barSize={20} />
+                          <Bar dataKey="Izin" fill="#6366f1" radius={[4,4,0,0]} barSize={20} />
+                          <Bar dataKey="Alpha" fill="#f43f5e" radius={[4,4,0,0]} barSize={20} />
+                       </BarChart>
+                    </ResponsiveContainer>
+                 </div>
+              </div>
+              <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-2xl">
+                 <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><Users size={18} className="text-indigo-600"/> Monitoring Per Guru (15 Teratas)</h3>
+                 <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                       <BarChart data={teacherChartData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 9, fontWeight: 'bold'}} />
+                          <YAxis axisLine={false} tickLine={false} hide />
+                          <Tooltip cursor={{fill: '#f8fafc'}} />
+                          <Bar dataKey="Hadir" fill="#10b981" radius={[4,4,0,0]} barSize={15} />
+                          <Bar dataKey="Izin" fill="#6366f1" radius={[4,4,0,0]} barSize={15} />
+                          <Bar dataKey="Alpha" fill="#f43f5e" radius={[4,4,0,0]} barSize={15} />
+                       </BarChart>
+                    </ResponsiveContainer>
+                 </div>
+              </div>
            </div>
 
            <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
@@ -231,7 +321,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               ) : (
                 <div className="py-12 text-center">
-                   <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Klik tombol untuk melihat analisa data hari ini</p>
+                   <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Klik tombol untuk melihat analisa data periode {timeFilter}</p>
                 </div>
               )}
            </div>
@@ -249,14 +339,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <table className="w-full text-left">
                  <thead className="bg-slate-50/30">
                     <tr>
-                       <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase">Waktu/Jam</th>
+                       <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase">Jam</th>
                        <th className="px-4 py-6 text-[9px] font-black text-slate-400 uppercase">Kelas</th>
                        <th className="px-4 py-6 text-[9px] font-black text-slate-400 uppercase">Guru & Pelajaran</th>
                        <th className="px-8 py-6 text-[9px] font-black text-slate-400 uppercase">Status</th>
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50">
-                    {filteredData.length > 0 ? filteredData.map((r, i) => (
+                    {filteredRecords.filter(r => r.tanggal === todayStr).length > 0 ? filteredRecords.filter(r => r.tanggal === todayStr).map((r, i) => (
                       <tr key={i} className="hover:bg-slate-50/50 transition-all">
                          <td className="px-8 py-6 font-black text-xs text-slate-500 italic">Jam ke-{r.jam}</td>
                          <td className="px-4 py-6"><span className={`px-3 py-1 rounded-lg text-[10px] font-black ${CLASS_COLORS[r.id_kelas] || 'bg-slate-100 text-slate-600'}`}>{r.id_kelas}</span></td>
@@ -320,16 +410,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'agenda' && (
         <div className="max-w-4xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
            <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
-              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><Calendar size={24} className="text-indigo-600"/> Kelola Agenda & Libur</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                 <input type="date" className="bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.tanggal} onChange={e => setNewEvent({...newEvent, tanggal: e.target.value})}/>
-                 <input className="bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.nama} onChange={e => setNewEvent({...newEvent, nama: e.target.value})} placeholder="Nama Event..."/>
-                 <select className="bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.tipe} onChange={e => setNewEvent({...newEvent, tipe: e.target.value as any})}>
-                    <option value="LIBUR">LIBUR SEKOLAH</option>
-                    <option value="KEGIATAN">KEGIATAN KHUSUS</option>
-                    <option value="JAM_KHUSUS">JAM KHUSUS</option>
-                 </select>
+              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><Calendar size={24} className="text-indigo-600"/> Kelola Agenda & Kalender Sekolah</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Tanggal</label>
+                    <input type="date" className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.tanggal} onChange={e => setNewEvent({...newEvent, tanggal: e.target.value})}/>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Nama Event</label>
+                    <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.nama} onChange={e => setNewEvent({...newEvent, nama: e.target.value})} placeholder="Contoh: Rapat Pleno..."/>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Tipe</label>
+                    <select className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.tipe} onChange={e => setNewEvent({...newEvent, tipe: e.target.value as any, affected_jams: e.target.value === 'JAM_KHUSUS' ? [] : undefined})}>
+                       <option value="LIBUR">LIBUR SEKOLAH</option>
+                       <option value="KEGIATAN">KEGIATAN KHUSUS</option>
+                       <option value="JAM_KHUSUS">JAM KHUSUS (DILIBURKAN)</option>
+                    </select>
+                 </div>
               </div>
+
+              {/* Checklist Jam Khusus */}
+              {newEvent.tipe === 'JAM_KHUSUS' && (
+                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8">
+                   <p className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Pilih Jam yang Ingin Diliburkan:</p>
+                   <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-9 gap-2">
+                      {PERIODS.map(jam => (
+                        <label key={jam} className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all cursor-pointer ${newEvent.affected_jams?.includes(jam) ? 'bg-indigo-600 text-white border-indigo-700 shadow-md' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
+                           <input 
+                             type="checkbox" 
+                             className="hidden" 
+                             checked={newEvent.affected_jams?.includes(jam)}
+                             onChange={e => {
+                               const current = newEvent.affected_jams || [];
+                               const updated = e.target.checked ? [...current, jam] : current.filter(j => j !== jam);
+                               setNewEvent({...newEvent, affected_jams: updated});
+                             }}
+                           />
+                           <span className="text-xs font-black">Jam {jam}</span>
+                        </label>
+                      ))}
+                   </div>
+                </div>
+              )}
+
               <button onClick={handleAddEvent} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
                  <Plus size={18}/> Tambah ke Kalender
               </button>
@@ -345,7 +469,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div>
                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{event.tanggal}</p>
                          <h4 className="text-sm font-black text-slate-800 uppercase italic">{event.nama}</h4>
-                         <span className="text-[9px] font-bold text-indigo-500 uppercase">{event.tipe}</span>
+                         <span className="text-[9px] font-bold text-indigo-500 uppercase">{event.tipe} {event.affected_jams && event.affected_jams.length > 0 && `(Jam: ${event.affected_jams.join(',')})`}</span>
                       </div>
                    </div>
                    <button onClick={() => handleRemoveEvent(event.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
@@ -474,7 +598,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                  <div className="flex flex-wrap justify-center md:justify-start gap-3">
                     <div className="flex items-center gap-2 bg-white/60 px-4 py-2 rounded-xl border border-current/10">
                        <ShieldCheck size={14}/>
-                       <span className="text-[9px] font-black uppercase tracking-tighter">Status Kunci: {hasKey ? 'TERBACA' : 'KOSONG'}</span>
+                       <span className="text-[9px] font-black uppercase tracking-tighter">Status Kunci: {process.env.API_KEY ? 'TERBACA' : 'KOSONG'}</span>
                     </div>
                     {!isLocalMode && (
                       <button onClick={() => window.location.reload()} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition-all">
