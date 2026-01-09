@@ -1,10 +1,8 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-// Fix: Correct path to types.ts
 import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from './types';
 import { NOTE_CHOICES, MAPEL_NAME_MAP } from '../constants';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Calendar, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
+import { ArrowLeft, Save, Calendar, AlertTriangle, ShieldCheck, Loader2, XCircle } from 'lucide-react';
 
 interface AttendanceFormProps {
   user: User;
@@ -31,14 +29,13 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
   const [dayName, setDayName] = useState('');
   const [blocks, setBlocks] = useState<BlockEntry[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
-  // Ref untuk menandai apakah kita sudah memuat data awal untuk tanggal yang dipilih
   const lastLoadedRef = useRef<string>("");
 
   const todayEvent = (settings?.events || []).find(e => e.tanggal === date);
   const isHoliday = todayEvent?.tipe === 'LIBUR' || todayEvent?.tipe === 'KEGIATAN';
 
-  // Logika pemuatan data: Hanya dipicu jika Tanggal berubah atau Data Absensi dari Cloud berubah (tapi hanya jika form masih bersih)
   useEffect(() => {
     const d = new Date(date);
     const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUM\'AT', 'SABTU'];
@@ -47,8 +44,6 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
 
     const loadKey = `${date}-${user.kelas}`;
     
-    // Kita muat data hanya jika tanggal/kelas berubah
-    // atau jika data awal belum pernah dimuat
     if (lastLoadedRef.current !== loadKey) {
       const safeAttendanceData = Array.isArray(attendanceData) ? attendanceData : [];
       const existingForDate = safeAttendanceData.filter(a => a.tanggal === date && a.id_kelas === user.kelas);
@@ -102,6 +97,8 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
     if (blocks.length === 0 || isSubmitting) return;
 
     setIsSubmitting(true);
+    setErrorMessage(null);
+    
     try {
       const recordsToSave: AttendanceRecord[] = [];
       blocks.forEach(block => {
@@ -124,8 +121,10 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
       await onSave(recordsToSave);
       alert('Laporan berhasil disimpan ke Cloud!');
       navigate('/');
-    } catch (err) {
-      alert('Gagal menyimpan. Periksa koneksi internet Anda.');
+    } catch (err: any) {
+      const msg = err.message || "Terjadi kesalahan yang tidak diketahui";
+      setErrorMessage(msg);
+      console.error("Submit error detail:", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -152,10 +151,21 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
         <div className="bg-white px-6 py-4 rounded-[22px] border border-slate-100 flex items-center gap-4 shadow-xl">
            <Calendar className="text-indigo-600" size={20} /><input type="date" className="outline-none text-[11px] font-black text-slate-800 bg-transparent uppercase" value={date} onChange={(e) => {
              setDate(e.target.value);
-             lastLoadedRef.current = ""; // Reset ref agar data baru dimuat
+             lastLoadedRef.current = "";
            }}/>
         </div>
       </div>
+
+      {errorMessage && (
+        <div className="bg-rose-50 border border-rose-100 p-6 rounded-[28px] mb-8 flex items-start gap-4 animate-in slide-in-from-top-4">
+           <XCircle className="text-rose-500 shrink-0" size={24} />
+           <div>
+              <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-1">Gagal Menyimpan</p>
+              <p className="text-sm font-bold text-rose-900 leading-relaxed">{errorMessage}</p>
+              <p className="text-[9px] text-rose-400 mt-2 font-medium">Saran: Pastikan tabel 'attendance' sudah dibuat di Supabase dan kebijakan RLS (Allow All) telah diaktifkan.</p>
+           </div>
+        </div>
+      )}
 
       {isHoliday ? (
         <div className="bg-white p-24 rounded-[40px] text-center border border-slate-100 shadow-2xl">
@@ -187,7 +197,6 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
                       <select disabled={block.isAdminControlled || isSubmitting} className="w-full bg-slate-50 border border-slate-100 px-5 py-3.5 rounded-2xl text-xs font-bold outline-none" value={block.catatan} onChange={e => {
                           const nb = [...blocks]; nb[idx].catatan = e.target.value; setBlocks(nb);
                         }}>
-                         {/* Fix: Explicitly type n as string to resolve unknown type error */}
                          {(NOTE_CHOICES as string[]).map((n: string) => <option key={n} value={n}>{n}</option>)}
                       </select>
                    </div>
