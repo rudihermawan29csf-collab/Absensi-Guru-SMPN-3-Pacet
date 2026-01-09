@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from '../types';
 import { CLASSES, MAPEL_NAME_MAP, TEACHER_COLORS } from '../constants';
@@ -20,18 +19,19 @@ const KetuaKelasDashboard: React.FC<KetuaKelasDashboardProps> = ({ user, data, t
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('harian');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1 < 10 ? `0${new Date().getMonth() + 1}` : `${new Date().getMonth() + 1}`);
   
-  const classInfo = CLASSES.find(c => c.id === user.kelas);
+  const classInfo = (CLASSES || []).find(c => c.id === user.kelas);
   const todayStr = new Date().toISOString().split('T')[0];
-  const todayEvent = settings.events.find(e => e.tanggal === todayStr);
+  const todayEvent = (settings?.events || []).find(e => e.tanggal === todayStr);
   const isHoliday = todayEvent?.tipe === 'LIBUR';
 
   const semesterMonths = useMemo(() => {
-    return settings.semester === 'Ganjil' 
+    return (settings?.semester === 'Ganjil')
       ? [{ v: '07', n: 'Juli' }, { v: '08', n: 'Agustus' }, { v: '09', n: 'September' }, { v: '10', n: 'Oktober' }, { v: '11', n: 'November' }, { v: '12', n: 'Desember' }]
       : [{ v: '01', n: 'Januari' }, { v: '02', n: 'Februari' }, { v: '03', n: 'Maret' }, { v: '04', n: 'April' }, { v: '05', n: 'Mei' }, { v: '06', n: 'Juni' }];
-  }, [settings.semester]);
+  }, [settings?.semester]);
 
   const filteredRecords = useMemo(() => {
+    if (!Array.isArray(data)) return [];
     const now = new Date();
     return data.filter(d => d.id_kelas === user.kelas).filter(record => {
       const recordDate = new Date(record.tanggal);
@@ -50,20 +50,20 @@ const KetuaKelasDashboard: React.FC<KetuaKelasDashboardProps> = ({ user, data, t
     filteredRecords.forEach(r => {
       if (!perf[r.nama_guru]) perf[r.nama_guru] = { name: r.nama_guru, Hadir: 0, Izin: 0, Sakit: 0, Alpha: 0 };
       const key = r.status === AttendanceStatus.TIDAK_HADIR ? 'Alpha' : r.status;
-      perf[r.nama_guru][key]++;
+      if (perf[r.nama_guru][key] !== undefined) perf[r.nama_guru][key]++;
     });
     return Object.values(perf);
   }, [filteredRecords]);
 
   const days = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUM\'AT', 'SABTU'];
   const today = days[new Date().getDay()];
-  const todaySchedule = schedule.filter(s => s.hari === today);
+  const todaySchedule = (schedule || []).filter(s => s.hari === today);
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-6 duration-700">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
         <div>
-          <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-2 block italic">TP {settings.tahunPelajaran} • {settings.semester}</span>
+          <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-2 block italic">TP {settings?.tahunPelajaran} • {settings?.semester}</span>
           <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none italic">Kelas {classInfo?.nama}</h1>
           <p className="text-slate-400 font-bold text-[11px] uppercase tracking-[0.2em] mt-2">{today}, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
         </div>
@@ -129,19 +129,19 @@ const KetuaKelasDashboard: React.FC<KetuaKelasDashboardProps> = ({ user, data, t
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {todaySchedule.map(item => {
-                  const mapping = item.mapping[user.kelas || ''] || '';
-                  const [mapel, teacherId] = mapping.split('-');
-                  const teacher = teachers.find(t => t.id === teacherId);
-                  const recorded = data.find(d => d.tanggal === todayStr && d.id_kelas === user.kelas && d.jam === item.jam);
+                  const mapping = (item.mapping && item.mapping[user.kelas || '']) || '';
+                  const [mapel, teacherId] = mapping.includes('-') ? mapping.split('-') : [mapping, ''];
+                  const teacher = (teachers || []).find(t => t.id === teacherId);
+                  const recorded = (data || []).find(d => d.tanggal === todayStr && d.id_kelas === user.kelas && d.jam === item.jam);
                   return (
                     <tr key={item.jam} className={`group hover:bg-slate-50/50 transition-all ${item.kegiatan !== 'KBM' ? 'opacity-40' : ''}`}>
                       <td className="px-8 py-7"><span className="w-10 h-10 rounded-[14px] bg-slate-100 flex items-center justify-center text-[11px] font-black text-slate-400">{item.jam}</span></td>
                       <td className="px-4 py-7"><span className="text-[11px] font-black text-slate-400">{item.waktu}</span></td>
                       <td className="px-4 py-7">{item.kegiatan === 'KBM' ? <span className="text-[13px] font-black uppercase text-slate-800 tracking-tight">{MAPEL_NAME_MAP[mapel] || mapel}</span> : <span className="text-[10px] font-black italic">{item.kegiatan}</span>}</td>
                       <td className="px-8 py-7">
-                         {item.kegiatan === 'KBM' && (
+                         {item.kegiatan === 'KBM' && mapping && (
                            <div className="flex flex-col gap-2">
-                              <div className={`px-4 py-2 rounded-xl border text-[11px] font-black uppercase ${teacher ? TEACHER_COLORS[teacher.id] : ''}`}>{teacher?.nama}</div>
+                              <div className={`px-4 py-2 rounded-xl border text-[11px] font-black uppercase ${teacher ? TEACHER_COLORS[teacher.id] : ''}`}>{teacher?.nama || teacherId || 'Tanpa Nama'}</div>
                               {recorded && <span className={`text-[9px] font-black uppercase ${recorded.status === AttendanceStatus.HADIR ? 'text-emerald-600' : 'text-rose-600'}`}>{recorded.status}</span>}
                            </div>
                          )}

@@ -19,14 +19,25 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('spn3_user');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = localStorage.getItem('spn3_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
   });
 
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>(() => {
-    const saved = localStorage.getItem('spn3_attendance');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('spn3_attendance');
+      if (!saved || saved === 'undefined' || saved === 'null') return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   });
+
   const [teachers, setTeachers] = useState<Teacher[]>(INITIAL_TEACHERS);
   const [schoolSchedule, setSchoolSchedule] = useState<ScheduleEntry[]>(INITIAL_SCHEDULE);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -45,15 +56,30 @@ const App: React.FC = () => {
     setHasError(false);
     try {
       const result = await spreadsheetService.getAllData();
-      if (result) {
-        if (result.attendance) setAttendanceData(result.attendance);
-        if (result.teachers) setTeachers(result.teachers);
-        if (result.schedule) setSchoolSchedule(result.schedule);
-        if (result.settings) setSettings(result.settings);
+      if (result && typeof result === 'object') {
+        // Hanya timpa jika data dari cloud memiliki isi
+        if (Array.isArray(result.attendance)) {
+          setAttendanceData(result.attendance);
+        }
+        
+        if (Array.isArray(result.teachers) && result.teachers.length > 0) {
+          setTeachers(result.teachers);
+        }
+        
+        if (Array.isArray(result.schedule) && result.schedule.length > 0) {
+          setSchoolSchedule(result.schedule);
+        }
+        
+        if (result.settings) {
+          setSettings({
+            ...DEFAULT_SETTINGS,
+            ...result.settings,
+            events: Array.isArray(result.settings.events) ? result.settings.events : []
+          });
+        }
         
         localStorage.setItem('spn3_full_data', JSON.stringify(result));
-      } else {
-        // Jika fetch gagal (null), tetap izinkan aplikasi jalan dengan data lokal
+      } else if (result === null) {
         console.warn("Gagal sinkronisasi. Menggunakan cache lokal.");
         setHasError(true);
       }
@@ -70,7 +96,9 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('spn3_attendance', JSON.stringify(attendanceData));
+    if (attendanceData) {
+      localStorage.setItem('spn3_attendance', JSON.stringify(attendanceData));
+    }
   }, [attendanceData]);
 
   const handleLogin = (newUser: User) => {
@@ -86,7 +114,7 @@ const App: React.FC = () => {
   const saveAttendanceBulk = async (newRecords: AttendanceRecord[]) => {
     setIsSaving(true);
     try {
-      const updatedAttendance = [...attendanceData];
+      const updatedAttendance = [...(attendanceData || [])];
       newRecords.forEach(rec => {
         const idx = updatedAttendance.findIndex(a => a.id === rec.id);
         if (idx > -1) updatedAttendance[idx] = rec;
@@ -162,35 +190,35 @@ const App: React.FC = () => {
       )}
       
       <Routes>
-        <Route path="/login" element={user ? <Navigate to="/" /> : <LoginPage onLogin={handleLogin} teachers={teachers} />} />
+        <Route path="/login" element={user ? <Navigate to="/" /> : <LoginPage onLogin={handleLogin} teachers={teachers || []} />} />
         
         <Route path="/" element={user ? <Layout user={user} onLogout={handleLogout} /> : <Navigate to="/login" />}>
           <Route index element={
             user?.role === UserRole.ADMIN ? (
               <AdminDashboard 
-                data={attendanceData} 
-                teachers={teachers} 
+                data={attendanceData || []} 
+                teachers={teachers || []} 
                 setTeachers={(val) => {
-                  const newList = typeof val === 'function' ? val(teachers) : val;
+                  const newList = typeof val === 'function' ? val(teachers || []) : val;
                   handleUpdateConfig('teachers', newList);
                 }} 
-                schedule={schoolSchedule}
+                schedule={schoolSchedule || []}
                 setSchedule={(val) => {
-                  const newList = typeof val === 'function' ? val(schoolSchedule) : val;
+                  const newList = typeof val === 'function' ? val(schoolSchedule || []) : val;
                   handleUpdateConfig('schedule', newList);
                 }}
-                settings={settings}
+                settings={settings || DEFAULT_SETTINGS}
                 setSettings={(val) => {
-                  const newSettings = typeof val === 'function' ? val(settings) : val;
+                  const newSettings = typeof val === 'function' ? val(settings || DEFAULT_SETTINGS) : val;
                   handleUpdateConfig('settings', newSettings);
                 }}
                 onSaveAttendance={saveAttendanceBulk}
               />
             ) :
             user?.role === UserRole.GURU ? (
-              <GuruDashboard user={user} data={attendanceData} teachers={teachers} settings={settings} />
+              <GuruDashboard user={user} data={attendanceData || []} teachers={teachers || []} settings={settings || DEFAULT_SETTINGS} />
             ) : (
-              <KetuaKelasDashboard user={user} data={attendanceData} teachers={teachers} settings={settings} schedule={schoolSchedule} />
+              <KetuaKelasDashboard user={user} data={attendanceData || []} teachers={teachers || []} settings={settings || DEFAULT_SETTINGS} schedule={schoolSchedule || []} />
             )
           } />
           
@@ -199,10 +227,10 @@ const App: React.FC = () => {
             <AttendanceForm 
               user={user} 
               onSave={saveAttendanceBulk} 
-              attendanceData={attendanceData} 
-              teachers={teachers} 
-              settings={settings}
-              schedule={schoolSchedule}
+              attendanceData={attendanceData || []} 
+              teachers={teachers || []} 
+              settings={settings || DEFAULT_SETTINGS}
+              schedule={schoolSchedule || []}
             /> : 
             <Navigate to="/" />
           } />

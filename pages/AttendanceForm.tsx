@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from '../types';
 import { NOTE_CHOICES, MAPEL_NAME_MAP } from '../constants';
@@ -30,7 +29,7 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
   const [dayName, setDayName] = useState('');
   const [blocks, setBlocks] = useState<BlockEntry[]>([]);
   
-  const todayEvent = settings.events.find(e => e.tanggal === date);
+  const todayEvent = (settings?.events || []).find(e => e.tanggal === date);
   const isHoliday = todayEvent?.tipe === 'LIBUR' || todayEvent?.tipe === 'KEGIATAN';
 
   useEffect(() => {
@@ -39,12 +38,13 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
     const selectedDay = dayNames[d.getDay()];
     setDayName(selectedDay);
 
-    const existingForDate = attendanceData.filter(a => a.tanggal === date && a.id_kelas === user.kelas);
+    const safeAttendanceData = Array.isArray(attendanceData) ? attendanceData : [];
+    const existingForDate = safeAttendanceData.filter(a => a.tanggal === date && a.id_kelas === user.kelas);
 
-    if (user.kelas && !isHoliday) {
-      let daySchedule = schedule.filter(s => s.hari === selectedDay && s.mapping[user.kelas || ''] && s.kegiatan === 'KBM');
+    if (user.kelas && !isHoliday && Array.isArray(schedule)) {
+      let daySchedule = schedule.filter(s => s.hari === selectedDay && s.mapping && s.mapping[user.kelas || ''] && s.kegiatan === 'KBM');
       
-      if (todayEvent?.tipe === 'JAM_KHUSUS' && todayEvent.affected_jams) {
+      if (todayEvent?.tipe === 'JAM_KHUSUS' && Array.isArray(todayEvent.affected_jams)) {
         daySchedule = daySchedule.filter(s => !todayEvent.affected_jams?.includes(s.jam));
       }
 
@@ -53,11 +53,13 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
 
       daySchedule.forEach((s) => {
         const mappingValue = s.mapping[user.kelas || ''];
+        if (!mappingValue || !mappingValue.includes('-')) return;
+
         const [mapelShort, teacherId] = mappingValue.split('-');
-        const teacher = teachers.find(t => t.id === teacherId);
+        const teacher = (teachers || []).find(t => t.id === teacherId);
         const fullMapel = MAPEL_NAME_MAP[mapelShort] || mapelShort;
         
-        const adminEntry = attendanceData.find(a => a.tanggal === date && a.id_guru === teacherId && a.is_admin_input);
+        const adminEntry = safeAttendanceData.find(a => a.tanggal === date && a.id_guru === teacherId && a.is_admin_input);
         const existingRecord = existingForDate.find(e => e.jam === s.jam);
 
         if (currentBlock && currentBlock.id_guru === teacherId && currentBlock.mapel === fullMapel && currentBlock.isAdminControlled === !!adminEntry) {

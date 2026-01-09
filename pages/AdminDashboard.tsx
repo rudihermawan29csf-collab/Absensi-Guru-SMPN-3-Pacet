@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo, useRef } from 'react';
 import { AttendanceRecord, AttendanceStatus, Teacher, AppSettings, SchoolEvent, ScheduleEntry } from '../types';
-import { CLASSES, CLASS_COLORS, NOTE_CHOICES, MAPEL_NAME_MAP } from '../constants';
+import { CLASSES, CLASS_COLORS, NOTE_CHOICES, MAPEL_NAME_MAP, TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE } from '../constants';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   Legend, Cell
@@ -9,7 +8,7 @@ import {
 import { 
   Users, LayoutGrid, Edit2, Trash2, Calendar, 
   Activity, Settings, ShieldCheck, BookOpen, Plus, Download, Upload, Trash, X, 
-  AlertTriangle, Save, CheckCircle2, Clock, Check
+  AlertTriangle, Save, CheckCircle2, Clock, Check, RefreshCw
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -30,6 +29,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [timeFilter, setTimeFilter] = useState<'harian' | 'mingguan' | 'bulanan'>('harian');
+  const [isRestoring, setIsRestoring] = useState(false);
   
   // Form States
   const [permitForm, setPermitForm] = useState({ 
@@ -62,21 +62,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Logic: Ambil Jam Mengajar Guru tertentu di hari tertentu
   const availableJamsForTeacher = useMemo(() => {
-    if (!permitForm.id_guru || !permitForm.tanggal) return [];
+    if (!permitForm.id_guru || !permitForm.tanggal || !Array.isArray(schedule)) return [];
     const day = getDayFromDate(permitForm.tanggal);
     
     // Cari di schedule semua jam di mana guru ini mengajar
     return schedule
       .filter(s => s.hari === day && s.kegiatan === 'KBM')
       .filter(s => {
-        return Object.values(s.mapping).some(val => (val as string).includes(permitForm.id_guru));
+        return s.mapping && Object.values(s.mapping).some(val => typeof val === 'string' && val.includes(permitForm.id_guru));
       })
       .map(s => s.jam);
   }, [permitForm.id_guru, permitForm.tanggal, schedule]);
 
   // Logic: Ambil Seluruh Jam Pelajaran di hari tertentu (untuk Agenda Jam Khusus)
   const allJamsOnDay = useMemo(() => {
-    if (!eventForm.tanggal) return [];
+    if (!eventForm.tanggal || !Array.isArray(schedule)) return [];
     const day = getDayFromDate(eventForm.tanggal);
     return schedule
       .filter(s => s.hari === day && s.kegiatan === 'KBM')
@@ -86,21 +86,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Action: Simpan Izin Guru
   const handleSavePermit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!permitForm.id_guru || permitForm.jam.length === 0) {
+    if (!permitForm.id_guru || !Array.isArray(permitForm.jam) || permitForm.jam.length === 0) {
       alert('Mohon pilih guru dan jam mengajar yang sesuai.');
       return;
     }
 
-    const teacher = teachers.find(t => t.id === permitForm.id_guru);
+    const teacher = (teachers || []).find(t => t.id === permitForm.id_guru);
     const dayName = getDayFromDate(permitForm.tanggal);
 
     const newRecords: AttendanceRecord[] = permitForm.jam.map(j => {
-      const sch = schedule.find(s => s.hari === dayName && s.jam === j);
+      const sch = (schedule || []).find(s => s.hari === dayName && s.jam === j);
       let mapel = 'Tugas Luar';
       let id_kelas = 'SEMUA';
 
-      if (sch) {
-        const classEntry = Object.entries(sch.mapping).find(([_, val]) => (val as string).includes(permitForm.id_guru));
+      if (sch && sch.mapping) {
+        const classEntry = Object.entries(sch.mapping).find(([_, val]) => typeof val === 'string' && val.includes(permitForm.id_guru));
         if (classEntry) {
           id_kelas = classEntry[0];
           const valStr = classEntry[1] as string;
@@ -137,7 +137,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       tanggal: eventForm.tanggal as string,
       affected_jams: eventForm.tipe === 'JAM_KHUSUS' ? eventForm.affected_jams : []
     };
-    setSettings({ ...settings, events: [...settings.events, newEvent] });
+    setSettings({ ...settings, events: [...(settings.events || []), newEvent] });
     setEventForm({ nama: '', tipe: 'KEGIATAN', tanggal: todayStr, affected_jams: [] });
     alert('Agenda berhasil disimpan.');
   };
@@ -156,8 +156,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingTeacherId(null);
   };
 
+  const handleRestoreDefaults = async () => {
+    if (!confirm('Tindakan ini akan mengunggah Jadwal dan Data Guru bawaan ke Cloud. Lanjutkan?')) return;
+    
+    setIsRestoring(true);
+    try {
+      setTeachers(INITIAL_TEACHERS);
+      setSchedule(INITIAL_SCHEDULE);
+      // Data akan otomatis tersinkron ke cloud via handleUpdateConfig di App.tsx
+      alert('Data bawaan berhasil dipulihkan.');
+    } catch (err) {
+      alert('Gagal memulihkan data.');
+    } finally {
+      setIsRestoring(false);
+    }
+  };
+
   // Stats
   const filteredData = useMemo(() => {
+    if (!Array.isArray(data)) return [];
     return data.filter(r => {
       if (timeFilter === 'harian') return r.tanggal === todayStr;
       return true;
@@ -208,7 +225,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { label: 'Izin & Sakit', val: stats.izin, color: 'indigo', icon: <ShieldCheck size={24}/> },
                 { label: 'Alpha (Tanpa Ket)', val: stats.alpha, color: 'rose', icon: <AlertTriangle size={24}/> }
               ].map((s, i) => (
-                <div key={i} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl shadow-slate-200/50 flex items-center gap-5">
+                <div key={i} className={`bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl shadow-slate-200/50 flex items-center gap-5`}>
                    <div className={`p-4 rounded-2xl bg-${s.color}-50 text-${s.color}-600`}>{s.icon}</div>
                    <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label}</p>
@@ -241,7 +258,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'monitoring' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-in fade-in">
            {CLASSES.map(c => {
-              const classRecs = data.filter(r => r.tanggal === todayStr && r.id_kelas === c.id);
+              const classRecs = (data || []).filter(r => r.tanggal === todayStr && r.id_kelas === c.id);
               const lastRec = classRecs[classRecs.length - 1];
               const isHadir = lastRec?.status === AttendanceStatus.HADIR;
               return (
@@ -292,7 +309,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Pilih Guru</label>
                        <select required className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20" value={permitForm.id_guru} onChange={e => setPermitForm({...permitForm, id_guru: e.target.value, jam: []})}>
                           <option value="">-- PILIH GURU --</option>
-                          {teachers.sort((a,b) => a.nama.localeCompare(b.nama)).map(t => <option key={t.id} value={t.id}>{t.nama}</option>)}
+                          {(teachers || []).slice().sort((a,b) => a.nama.localeCompare(b.nama)).map(t => <option key={t.id} value={t.id}>{t.nama}</option>)}
                        </select>
                     </div>
                     <div>
@@ -391,12 +408,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
            
            <div className="lg:col-span-2 space-y-4">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest px-4 mb-2 italic">Daftar Agenda</h3>
-              {settings.events.length === 0 ? (
+              {(!settings.events || settings.events.length === 0) ? (
                 <div className="bg-slate-50 border-2 border-dashed border-slate-200 p-16 rounded-[40px] text-center">
                    <p className="text-slate-400 font-bold text-xs uppercase tracking-widest italic">Kosong</p>
                 </div>
               ) : (
-                settings.events.sort((a,b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime()).map(ev => (
+                settings.events.slice().sort((a,b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime()).map(ev => (
                   <div key={ev.id} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex justify-between items-center group">
                      <div className="flex gap-5 items-center">
                         <div className={`p-4 rounded-2xl ${ev.tipe === 'LIBUR' ? 'bg-rose-50 text-rose-600' : (ev.tipe === 'JAM_KHUSUS' ? 'bg-amber-50 text-amber-600' : 'bg-indigo-50 text-indigo-600')}`}>
@@ -447,13 +464,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 text-sm">
-                    {teachers.map(t => (
+                    {(teachers || []).map(t => (
                       <tr key={t.id} className="hover:bg-slate-50/50 transition-colors group">
                         <td className="px-8 py-6"><span className="font-black text-indigo-600 text-xs bg-indigo-50 px-2 py-1 rounded-lg uppercase">{t.id}</span></td>
                         <td className="px-8 py-6 font-black text-slate-800 uppercase text-xs italic">{t.nama}</td>
                         <td className="px-8 py-6">
                            <div className="flex flex-wrap gap-1">
-                              {t.mapel.map((m, i) => <span key={i} className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full uppercase">{m}</span>)}
+                              {t.mapel && t.mapel.map((m, i) => <span key={i} className="text-[9px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full uppercase">{m}</span>)}
                            </div>
                         </td>
                         <td className="px-8 py-6 text-right space-x-1">
@@ -496,14 +513,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </tr>
                  </thead>
                  <tbody className="divide-y divide-slate-50 font-bold">
-                    {schedule.map((s, idx) => (
+                    {(schedule || []).map((s, idx) => (
                       <tr key={idx} className={`${s.kegiatan !== 'KBM' ? 'bg-slate-50/50' : ''} hover:bg-slate-50/80 group transition-all`}>
                          <td className="px-6 py-4 font-black text-slate-800 sticky left-0 bg-white group-hover:bg-slate-50 border-r uppercase italic">{s.hari}</td>
                          <td className="px-4 py-4 text-center border-r"><span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg text-[9px]">{s.jam}</span></td>
                          <td className={`px-6 py-4 border-r uppercase ${s.kegiatan === 'KBM' ? 'text-indigo-600 font-black' : 'text-slate-400 italic font-medium'}`}>{s.kegiatan}</td>
                          {CLASSES.map(c => (
                             <td key={c.id} className="px-3 py-4 text-center text-slate-300 border-r group-hover:text-slate-600 transition-colors">
-                               {s.mapping[c.id] || '-'}
+                               {(s.mapping && s.mapping[c.id]) || '-'}
                             </td>
                          ))}
                       </tr>
@@ -531,6 +548,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <button key={s} onClick={() => setSettings({...settings, semester: s as any})} className={`py-4 rounded-2xl text-xs font-black uppercase border transition-all ${settings.semester === s ? 'bg-indigo-600 text-white border-indigo-700 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100 hover:text-indigo-500'}`}>{s}</button>
                        ))}
                     </div>
+                 </div>
+              </div>
+           </div>
+
+           <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
+              <div className="flex items-start gap-5">
+                 <div className="p-4 bg-indigo-50 text-indigo-600 rounded-2xl"><RefreshCw size={24} className={isRestoring ? 'animate-spin' : ''}/></div>
+                 <div>
+                    <h4 className="text-slate-800 font-black text-xs uppercase italic mb-2 tracking-widest">Sinkronisasi Awal</h4>
+                    <p className="text-[11px] text-slate-500 mb-5 font-bold uppercase leading-relaxed">Gunakan fitur ini jika jadwal masih kosong di cloud. Ini akan mengunggah data jadwal dan guru bawaan sekolah ke Google Spreadsheet.</p>
+                    <button 
+                      onClick={handleRestoreDefaults} 
+                      disabled={isRestoring}
+                      className="bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest px-8 py-4 rounded-2xl hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all flex items-center gap-2"
+                    >
+                      {isRestoring ? 'Mengunggah...' : 'PULIHKAN JADWAL BAWAAN'}
+                    </button>
                  </div>
               </div>
            </div>
