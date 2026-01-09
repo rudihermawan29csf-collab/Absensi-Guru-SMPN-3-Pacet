@@ -1,18 +1,18 @@
+
 import React, { useState, useMemo } from 'react';
 import { AttendanceRecord, AttendanceStatus, Teacher, AppSettings, SchoolEvent, ScheduleEntry } from './types';
 import { CLASSES, CLASS_COLORS, MAPEL_NAME_MAP, TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE, TEACHER_COLORS, PERIODS } from '../constants';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
-  PieChart, Pie
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell
 } from 'recharts';
 import { 
   Users, LayoutGrid, Edit2, Trash2, Calendar, 
   Activity, Settings, ShieldCheck, BookOpen, Plus, Trash, X, 
   AlertTriangle, Save, CheckCircle2, RefreshCw, Sparkles, Loader2,
   Wifi, WifiOff, Coffee, Clock, Filter, BarChart3, ChevronRight,
-  TrendingUp, ArrowUpRight, ArrowDownRight
+  TrendingUp, ArrowUpRight, ArrowDownRight, Key
 } from 'lucide-react';
-import {GoogleGenAI} from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { supabase } from '../supabase';
 
 interface AdminDashboardProps {
@@ -28,6 +28,18 @@ interface AdminDashboardProps {
 
 type AdminTab = 'overview' | 'monitoring' | 'permits' | 'agenda' | 'teachers' | 'schedule' | 'settings';
 type TimeFilter = 'harian' | 'mingguan' | 'bulanan' | 'semester';
+
+// Fix: Correctly define the AIStudio interface to avoid type conflicts in the global window object.
+interface AIStudio {
+  hasSelectedApiKey(): Promise<boolean>;
+  openSelectKey(): Promise<void>;
+}
+
+declare global {
+  interface Window {
+    aistudio: AIStudio;
+  }
+}
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
   data, teachers, setTeachers, schedule, setSchedule, settings, setSettings, onSaveAttendance 
@@ -62,6 +74,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const isLocalMode = (supabase as any).isLocal;
   const todayStr = new Date().toISOString().split('T')[0];
+  const hasKey = !!process.env.API_KEY;
+
+  const handleOpenKeySelector = async () => {
+    try {
+      if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+        await window.aistudio.openSelectKey();
+        window.location.reload();
+      } else {
+        alert('Fitur pemilihan kunci tidak tersedia di lingkungan ini.');
+      }
+    } catch (err) {
+      console.error('Key selector error:', err);
+    }
+  };
 
   // Helper: Get periods for specific date in agenda
   const getPeriodsForDate = (dateStr: string) => {
@@ -101,7 +127,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const hadir = classRecords.filter(r => r.status === AttendanceStatus.HADIR).length;
       return {
         id: cls.id,
-        nama: cls.nama,
         hadir,
         persentase: total > 0 ? Math.round((hadir / total) * 100) : 0,
         total
@@ -128,11 +153,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleGenerateAiInsight = async () => {
     setIsAnalyzing(true);
     try {
-      const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
+      // Fix: Creating a new GoogleGenAI instance inside the function as recommended for Gemini 3.
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: `Berikan ringkasan eksekutif profesional mengenai data absensi SMPN 3 Pacet periode ${timeFilter}. Statistik: Hadir ${stats.hadir}, Izin ${stats.izin}, Alpha ${stats.alpha}. Berikan rekomendasi untuk peningkatan disiplin.`,
       });
+      // Fix: Using the .text property directly (not a method call).
       setAiInsight(response.text || 'Gagal memperoleh analisa cerdas.');
     } catch (err) {
       setAiInsight('Layanan analisa AI sedang tidak tersedia.');
@@ -260,7 +287,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* OVERVIEW TAB */}
       {activeTab === 'overview' && (
         <div className="space-y-6 animate-in fade-in duration-500">
-           {/* Filters */}
            <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-[28px] border border-slate-100 shadow-sm">
               <div className="flex bg-slate-100 p-1 rounded-xl">
                  {(['harian', 'mingguan', 'bulanan', 'semester'] as TimeFilter[]).map(f => (
@@ -274,12 +300,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               )}
            </div>
 
-           {/* Stats Overview */}
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
                 { label: 'Total Kehadiran', val: stats.hadir, color: 'emerald', icon: <CheckCircle2 size={24}/>, trend: '+5%' },
                 { label: 'Izin & Sakit', val: stats.izin, color: 'indigo', icon: <ShieldCheck size={24}/>, trend: '-2%' },
-                { label: 'Alpha (Tanpa Ket)', val: stats.alpha, color: 'rose', icon: <AlertTriangle size={24}/>, trend: '+1%' },
+                { label: 'Alpha', val: stats.alpha, color: 'rose', icon: <AlertTriangle size={24}/>, trend: '+1%' },
                 { label: 'Total Sesi KBM', val: stats.total, color: 'slate', icon: <BookOpen size={24}/>, trend: '0%' }
               ].map((s, i) => (
                 <div key={i} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center justify-between group hover:border-indigo-100 transition-all">
@@ -298,9 +323,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ))}
            </div>
 
-           {/* Main Analysis Section */}
            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Detailed Breakdown Per Kelas */}
               <div className="lg:col-span-2 bg-white p-8 rounded-[40px] border border-slate-100 shadow-2xl">
                  <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><BarChart3 size={18} className="text-indigo-600"/> Monitoring Kehadiran Per Kelas</h3>
                  <div className="overflow-x-auto">
@@ -331,7 +354,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                  </div>
               </div>
 
-              {/* Ranking Guru */}
               <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-2xl">
                  <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><Users size={18} className="text-indigo-600"/> Ranking Kedisiplinan Guru</h3>
                  <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
@@ -350,31 +372,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     ))}
                  </div>
               </div>
-           </div>
-
-           {/* AI Insight Section */}
-           <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
-              <div className="flex items-center justify-between mb-8">
-                 <h3 className="text-sm font-black text-slate-900 uppercase italic flex items-center gap-3">
-                   <Sparkles className="text-indigo-500" size={20}/> Ringkasan Analitik AI
-                 </h3>
-                 <button 
-                   onClick={handleGenerateAiInsight}
-                   disabled={isAnalyzing}
-                   className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-700 transition-all disabled:opacity-50"
-                 >
-                   {isAnalyzing ? <Loader2 size={14} className="animate-spin"/> : <TrendingUp size={14}/>} {isAnalyzing ? 'Memproses...' : 'Tampilkan Analisa'}
-                 </button>
-              </div>
-              {aiInsight ? (
-                <div className="prose prose-slate max-w-none text-slate-600 text-sm leading-relaxed font-medium bg-slate-50 p-8 rounded-3xl border border-slate-100 animate-in fade-in duration-700">
-                   {aiInsight}
-                </div>
-              ) : (
-                <div className="py-12 text-center border-2 border-dashed border-slate-100 rounded-[32px]">
-                   <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Aktifkan analisa AI untuk mendapatkan insight periode {timeFilter}</p>
-                </div>
-              )}
            </div>
         </div>
       )}
@@ -424,86 +421,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* AGENDA TAB */}
-      {activeTab === 'agenda' && (
-        <div className="max-w-4xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
-           <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
-              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><Calendar size={24} className="text-indigo-600"/> Kelola Kalender & Jam Khusus</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                 <div>
-                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Pilih Tanggal</label>
-                    <input type="date" className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.tanggal} onChange={e => setNewEvent({...newEvent, tanggal: e.target.value, affected_jams: []})}/>
-                 </div>
-                 <div>
-                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Keterangan Event</label>
-                    <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.nama} onChange={e => setNewEvent({...newEvent, nama: e.target.value})} placeholder="Contoh: HUT Sekolah..."/>
-                 </div>
-                 <div>
-                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Tipe Agenda</label>
-                    <select className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.tipe} onChange={e => setNewEvent({...newEvent, tipe: e.target.value as any, affected_jams: []})}>
-                       <option value="LIBUR">LIBUR TOTAL</option>
-                       <option value="KEGIATAN">KEGIATAN SEKOLAH</option>
-                       <option value="JAM_KHUSUS">JAM KHUSUS (DILIBURKAN)</option>
-                    </select>
-                 </div>
-              </div>
-
-              {/* Checklist Jam Khusus Dinamis berdasarkan Jadwal Hari tersebut */}
-              {newEvent.tipe === 'JAM_KHUSUS' && (
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8 animate-in zoom-in duration-300">
-                   <p className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Pilih Jam yang Ingin Dikosongkan:</p>
-                   <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 gap-2">
-                      {getPeriodsForDate(newEvent.tanggal || todayStr).map(jam => (
-                        <label key={jam} className={`flex flex-col items-center justify-center p-4 rounded-2xl border transition-all cursor-pointer ${newEvent.affected_jams?.includes(jam) ? 'bg-indigo-600 text-white border-indigo-700 shadow-md scale-95' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
-                           <input 
-                             type="checkbox" 
-                             className="hidden" 
-                             checked={newEvent.affected_jams?.includes(jam)}
-                             onChange={e => {
-                               const current = newEvent.affected_jams || [];
-                               const updated = e.target.checked ? [...current, jam] : current.filter(j => j !== jam);
-                               setNewEvent({...newEvent, affected_jams: updated});
-                             }}
-                           />
-                           <span className="text-xs font-black">JAM {jam}</span>
-                        </label>
-                      ))}
-                   </div>
-                   {getPeriodsForDate(newEvent.tanggal || todayStr).length === 0 && (
-                     <p className="text-center text-[10px] font-bold text-rose-400 uppercase italic">Tidak ada jadwal KBM pada hari ini.</p>
-                   )}
-                </div>
-              )}
-
-              <button onClick={handleAddEvent} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
-                 <Plus size={18}/> Simpan ke Kalender Sekolah
-              </button>
-           </div>
-
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {(settings.events || []).map(event => (
-                <div key={event.id} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center justify-between group hover:border-indigo-100 transition-all">
-                   <div className="flex items-center gap-5">
-                      <div className={`p-4 rounded-2xl ${event.tipe === 'LIBUR' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
-                         {event.tipe === 'LIBUR' ? <Coffee size={24}/> : <Calendar size={24}/>}
-                      </div>
-                      <div>
-                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{event.tanggal}</p>
-                         <h4 className="text-sm font-black text-slate-800 uppercase italic leading-none mb-1">{event.nama}</h4>
-                         <span className="text-[8px] font-black text-indigo-500 uppercase tracking-widest">
-                           {event.tipe} {event.affected_jams && event.affected_jams.length > 0 && `(JAM: ${event.affected_jams.join(',')})`}
-                         </span>
-                      </div>
-                   </div>
-                   <button onClick={() => handleRemoveEvent(event.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
-                      <Trash2 size={20}/>
-                   </button>
-                </div>
-              ))}
-           </div>
-        </div>
-      )}
-
       {/* PERMITS TAB */}
       {activeTab === 'permits' && (
         <div className="max-w-4xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
@@ -536,6 +453,82 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button onClick={handleApplyPermit} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
                  <Save size={18}/> Terapkan ke Semua Jam Mengajar
               </button>
+           </div>
+        </div>
+      )}
+
+      {/* AGENDA TAB */}
+      {activeTab === 'agenda' && (
+        <div className="max-w-4xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
+           <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
+              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><Calendar size={24} className="text-indigo-600"/> Kelola Kalender & Jam Khusus</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Pilih Tanggal</label>
+                    <input type="date" className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.tanggal} onChange={e => setNewEvent({...newEvent, tanggal: e.target.value, affected_jams: []})}/>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Keterangan Event</label>
+                    <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.nama} onChange={e => setNewEvent({...newEvent, nama: e.target.value})} placeholder="Contoh: HUT Sekolah..."/>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Tipe Agenda</label>
+                    <select className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.tipe} onChange={e => setNewEvent({...newEvent, tipe: e.target.value as any, affected_jams: []})}>
+                       <option value="LIBUR">LIBUR TOTAL</option>
+                       <option value="KEGIATAN">KEGIATAN SEKOLAH</option>
+                       <option value="JAM_KHUSUS">JAM KHUSUS (DILIBURKAN)</option>
+                    </select>
+                 </div>
+              </div>
+
+              {newEvent.tipe === 'JAM_KHUSUS' && (
+                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8 animate-in zoom-in duration-300">
+                   <p className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Pilih Jam yang Ingin Dikosongkan:</p>
+                   <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 gap-2">
+                      {getPeriodsForDate(newEvent.tanggal || todayStr).map(jam => (
+                        <label key={jam} className={`flex flex-col items-center justify-center p-4 rounded-2xl border transition-all cursor-pointer ${newEvent.affected_jams?.includes(jam) ? 'bg-indigo-600 text-white border-indigo-700 shadow-md scale-95' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
+                           <input 
+                             type="checkbox" 
+                             className="hidden" 
+                             checked={newEvent.affected_jams?.includes(jam)}
+                             onChange={e => {
+                               const current = newEvent.affected_jams || [];
+                               const updated = e.target.checked ? [...current, jam] : current.filter(j => j !== jam);
+                               setNewEvent({...newEvent, affected_jams: updated});
+                             }}
+                           />
+                           <span className="text-xs font-black">JAM {jam}</span>
+                        </label>
+                      ))}
+                   </div>
+                </div>
+              )}
+
+              <button onClick={handleAddEvent} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
+                 <Plus size={18}/> Simpan ke Kalender Sekolah
+              </button>
+           </div>
+
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {(settings.events || []).map(event => (
+                <div key={event.id} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center justify-between group hover:border-indigo-100 transition-all">
+                   <div className="flex items-center gap-5">
+                      <div className={`p-4 rounded-2xl ${event.tipe === 'LIBUR' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
+                         {event.tipe === 'LIBUR' ? <Coffee size={24}/> : <Calendar size={24}/>}
+                      </div>
+                      <div>
+                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{event.tanggal}</p>
+                         <h4 className="text-sm font-black text-slate-800 uppercase italic leading-none mb-1">{event.nama}</h4>
+                         <span className="text-[8px] font-black text-indigo-500 uppercase tracking-widest">
+                           {event.tipe} {event.affected_jams && event.affected_jams.length > 0 && `(JAM: ${event.affected_jams.join(',')})`}
+                         </span>
+                      </div>
+                   </div>
+                   <button onClick={() => handleRemoveEvent(event.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
+                      <Trash2 size={20}/>
+                   </button>
+                </div>
+              ))}
            </div>
         </div>
       )}
@@ -631,39 +624,35 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* SISTEM TAB */}
       {activeTab === 'settings' && (
         <div className="max-w-3xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
-           <div className={`p-8 rounded-[40px] border flex flex-col md:flex-row items-center md:items-start gap-6 shadow-2xl relative overflow-hidden ${isLocalMode ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
-              {!isLocalMode && (
-                <div className="absolute top-0 right-0 p-8 opacity-10 animate-pulse text-emerald-600">
-                  <Activity size={120} />
-                </div>
-              )}
-              <div className={`p-5 rounded-[24px] shadow-sm shrink-0 flex items-center justify-center ${isLocalMode ? 'bg-white text-amber-600' : 'bg-white text-emerald-600'}`}>
-                 {isLocalMode ? <WifiOff size={40}/> : <Wifi size={40}/>}
+           <div className={`p-8 rounded-[40px] border flex flex-col md:flex-row items-center md:items-start gap-6 shadow-2xl relative overflow-hidden ${!hasKey ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+              <div className={`p-5 rounded-[24px] shadow-sm shrink-0 flex items-center justify-center ${!hasKey ? 'bg-white text-amber-600' : 'bg-white text-emerald-600'}`}>
+                 {!hasKey ? <WifiOff size={40}/> : <Wifi size={40}/>}
               </div>
               <div className="flex-1 text-center md:text-left relative z-10">
                  <div className="flex flex-col md:flex-row md:items-center gap-2 mb-3">
-                    <h4 className={`font-black text-xs uppercase italic tracking-widest ${isLocalMode ? 'text-amber-800' : 'text-emerald-800'}`}>
-                      Koneksi Cloud: {isLocalMode ? 'TIDAK TERDETEKSI' : 'AKTIF & SINKRON'}
+                    <h4 className={`font-black text-xs uppercase italic tracking-widest ${!hasKey ? 'text-amber-800' : 'text-emerald-800'}`}>
+                      Koneksi Cloud: {!hasKey ? 'TIDAK AKTIF' : 'SINKRON'}
                     </h4>
-                    {!isLocalMode && (
-                      <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-tighter w-fit mx-auto md:mx-0">Verified</span>
+                    {hasKey && (
+                      <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-tighter w-fit mx-auto md:mx-0">Cloud Connected</span>
                     )}
                  </div>
-                 <p className={`text-[11px] font-bold uppercase tracking-tight leading-relaxed mb-6 ${isLocalMode ? 'text-amber-600' : 'text-emerald-600'}`}>
-                   {isLocalMode 
-                     ? "Peringatan: Aplikasi masih berjalan secara Lokal. Jika Anda sudah memasukkan API_KEY di Secrets, silakan lakukan REFRESH browser Anda sekarang." 
-                     : "Sempurna! Aplikasi telah menggunakan Cloud Database. Data aman di server SMPN 3 Pacet."}
+                 <p className={`text-[11px] font-bold uppercase tracking-tight leading-relaxed mb-6 ${!hasKey ? 'text-amber-600' : 'text-emerald-600'}`}>
+                   {!hasKey 
+                     ? "Aplikasi berjalan dalam mode lokal (Mockup). Hubungkan API Key Anda untuk mengaktifkan sinkronisasi database Supabase." 
+                     : "Sempurna! Aplikasi terhubung ke Cloud Database. Semua data tersinkronisasi secara real-time."}
                  </p>
                  <div className="flex flex-wrap justify-center md:justify-start gap-3">
-                    <div className="flex items-center gap-2 bg-white/60 px-4 py-2 rounded-xl border border-current/10">
-                       <ShieldCheck size={14}/>
-                       <span className="text-[9px] font-black uppercase tracking-tighter">Status Kunci: {process.env.API_KEY ? 'TERBACA' : 'KOSONG'}</span>
-                    </div>
-                    {!isLocalMode && (
-                      <button onClick={() => window.location.reload()} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition-all">
-                        <RefreshCw size={14}/>
-                        <span className="text-[9px] font-black uppercase tracking-tighter">Refresh Koneksi</span>
+                    {!hasKey ? (
+                      <button onClick={handleOpenKeySelector} className="flex items-center gap-2 bg-amber-600 text-white px-6 py-3 rounded-xl shadow-lg shadow-amber-200 hover:bg-amber-700 transition-all">
+                        <Key size={14}/>
+                        <span className="text-[9px] font-black uppercase tracking-tighter">Pilih API Key (Aktifkan Cloud)</span>
                       </button>
+                    ) : (
+                      <div className="flex items-center gap-2 bg-white/60 px-4 py-2 rounded-xl border border-emerald-100">
+                         <ShieldCheck className="text-emerald-600" size={14}/>
+                         <span className="text-[9px] font-black uppercase tracking-tighter text-emerald-800 italic">API Key Terdeteksi</span>
+                      </div>
                     )}
                  </div>
               </div>
