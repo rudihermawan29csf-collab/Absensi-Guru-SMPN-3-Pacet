@@ -87,8 +87,33 @@ const App: React.FC = () => {
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'offline' | 'error'>('synced');
 
+  /**
+   * SMART MERGE LOGIC
+   * Menggabungkan data dari Cloud tanpa menghapus data lokal yang belum tersinkron.
+   */
+  const mergeData = (local: AttendanceRecord[], cloud: AttendanceRecord[]) => {
+    const merged = [...cloud];
+    const cloudIds = new Set(cloud.map(item => item.id));
+    
+    // Tambahkan data lokal yang TIDAK ada di cloud (berarti baru/belum sinkron)
+    local.forEach(localItem => {
+      if (!cloudIds.has(localItem.id)) {
+        merged.push(localItem);
+      }
+    });
+
+    // Urutkan berdasarkan tanggal dan jam agar tampilan tetap rapi
+    return merged.sort((a, b) => {
+      const dateCompare = b.tanggal.localeCompare(a.tanggal);
+      if (dateCompare !== 0) return dateCompare;
+      return b.jam.localeCompare(a.jam);
+    });
+  };
+
   const loadData = useCallback(async (isManual = false) => {
+    // Jika sedang menyimpan, jangan tarik data agar tidak bentrok
     if (isSavingRef.current) return;
+    
     if (!isSpreadsheetConfigured) {
       setIsLoading(false);
       return;
@@ -101,17 +126,31 @@ const App: React.FC = () => {
       const result = await spreadsheetService.getAllData();
       
       if (result && typeof result === 'object' && !isSavingRef.current) {
-        if (Array.isArray(result.attendance)) setAttendanceData(result.attendance);
+        // Ambil data lokal saat ini untuk perbandingan
+        const currentLocalData = JSON.parse(localStorage.getItem('spn3_cached_data') || '{}').attendance || [];
+        
+        // 1. SMART MERGE ATTENDANCE (Mencegah data hilang)
+        if (Array.isArray(result.attendance)) {
+          const finalAttendance = mergeData(currentLocalData, result.attendance);
+          setAttendanceData(finalAttendance);
+        }
+
+        // 2. Update Configs
         if (Array.isArray(result.teachers) && result.teachers.length > 0) setTeachers(result.teachers);
         if (Array.isArray(result.schedule) && result.schedule.length > 0) setSchoolSchedule(result.schedule);
         if (result.settings) setSettings(result.settings);
         
         setLastSync(new Date());
         setSyncStatus('synced');
-        localStorage.setItem('spn3_cached_data', JSON.stringify(result));
+        
+        // Simpan hasil merge ke cache
+        localStorage.setItem('spn3_cached_data', JSON.stringify({
+          ...result,
+          attendance: mergeData(currentLocalData, result.attendance || [])
+        }));
       }
     } catch (err) {
-      console.warn("Gagal menarik data cloud, menggunakan data lokal.");
+      console.warn("Sinkronisasi gagal, mempertahankan data lokal.");
       setSyncStatus('error');
     } finally {
       setIsLoading(false);
@@ -120,8 +159,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    // Interval 5 menit untuk sinkronisasi otomatis
-    const interval = setInterval(() => loadData(true), 5 * 60 * 1000);
+    const interval = setInterval(() => loadData(true), 10 * 60 * 1000); // 10 menit sekali saja
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -136,10 +174,10 @@ const App: React.FC = () => {
   };
 
   const saveAttendanceBulk = async (newRecords: AttendanceRecord[]) => {
-    // 1. LANGSUNG SIMPAN KE LOKAL (Instant UX)
     setIsSaving(true);
     isSavingRef.current = true;
     
+    // 1. Update state lokal + cache segera
     let updatedAttendance: AttendanceRecord[] = [];
     setAttendanceData(prev => {
       const updated = [...prev];
@@ -158,12 +196,9 @@ const App: React.FC = () => {
       attendance: updatedAttendance
     }));
 
-    // 2. KIRIM KE CLOUD DI LATAR BELAKANG
+    // 2. Kirim ke cloud
     try {
-      // Kita tidak melempar error meskipun jaringan bermasalah di sini,
-      // karena data sudah aman di localStorage.
       const success = await spreadsheetService.saveAttendance(newRecords);
-      
       if (success) {
         setSyncStatus('synced');
         setLastSync(new Date());
@@ -173,11 +208,12 @@ const App: React.FC = () => {
     } catch (error) {
       setSyncStatus('offline');
     } finally {
-      // Delay visual agar user tahu ada proses 'sinkronisasi'
+      // BERI JEDA 3 DETIK sebelum mengizinkan penarikan data cloud kembali
+      // Ini krusial agar server Google punya waktu untuk memproses data baru tersebut
       setTimeout(() => {
         setIsSaving(false);
         isSavingRef.current = false;
-      }, 2000);
+      }, 3000);
     }
   };
 
@@ -206,7 +242,7 @@ const App: React.FC = () => {
             <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
           </div>
         </div>
-        <h2 className="text-slate-800 font-black text-xs uppercase tracking-[0.2em] mb-3">Memuat Sistem</h2>
+        <h2 className="text-slate-800 font-black text-xs uppercase tracking-[0.2em] mb-3">Menghubungkan Database</h2>
         <div className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-full">
           <Database size={12} className="text-slate-400" />
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest leading-none italic">SIAP GURU SMPN 3 PACET</p>
@@ -221,7 +257,7 @@ const App: React.FC = () => {
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000]">
           <div className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-slate-800 animate-in fade-in zoom-in duration-300">
             <RefreshCw size={14} className="text-indigo-400 animate-spin" />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sinkronisasi...</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Mengamankan Data...</span>
           </div>
         </div>
       )}
