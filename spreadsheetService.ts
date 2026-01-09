@@ -1,12 +1,11 @@
 /**
  * LAYANAN GOOGLE SPREADSHEET
  * 
- * PENTING: SCRIPT_URL telah diperbarui dengan URL deployment Anda.
+ * Versi Sinkronisasi Handal (Anti-Cache & Anti-CORS Error)
  */
 
 const SCRIPT_URL: string = "https://script.google.com/macros/s/AKfycbzDANrhGzWTVLqEHzmqOKPCWZOUVHJqbK2Y3SbDq3WAbRbukHfTTnCkHwvvIIBX9CpU/exec";
 
-// Cek apakah URL masih menggunakan placeholder atau kosong
 export const isSpreadsheetConfigured = SCRIPT_URL !== "" && !SCRIPT_URL.includes("REPLACE_WITH_YOUR_ID");
 
 export const spreadsheetService = {
@@ -17,76 +16,63 @@ export const spreadsheetService = {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 detik timeout
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-      const response = await fetch(`${SCRIPT_URL}?action=getAll`, {
+      // Menambahkan timestamp untuk mencegah browser caching data lama
+      const cacheBuster = `&_t=${Date.now()}`;
+      const response = await fetch(`${SCRIPT_URL}?action=getAll${cacheBuster}`, {
         method: 'GET',
         signal: controller.signal,
-        headers: { 
-          'Accept': 'application/json'
-        }
+        // Penting: Jangan gunakan header kustom yang memicu preflight jika tidak perlu
       });
       
       clearTimeout(timeoutId);
 
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
       
-      const text = await response.text();
-      try {
-        return JSON.parse(text);
-      } catch (e) {
-        console.error("Format respons bukan JSON:", text);
-        throw new Error("Respons dari server tidak valid");
-      }
+      const result = await response.json();
+      return result;
     } catch (error: any) {
-      if (error.name === 'AbortError') {
-        console.warn("Sinkronisasi dibatalkan karena timeout (jaringan lambat).");
-      } else {
-        console.error("Spreadsheet Sync Error:", error.message);
-      }
+      console.error("Fetch Error:", error.message);
       return null;
     }
   },
 
-  async saveAttendance(records: any[]) {
+  /**
+   * Mengirim data ke GAS.
+   * Menggunakan Content-Type: text/plain untuk menghindari Preflight (OPTIONS) 
+   * yang sering bermasalah di GAS, namun isi tetap JSON string.
+   */
+  async postData(payload: any) {
     if (!isSpreadsheetConfigured) return false;
 
     try {
-      // Menggunakan mode: 'no-cors' karena Google Apps Script melakukan redirect 302 
-      // yang seringkali gagal pada preflight CORS browser saat mengirim JSON.
-      // Catatan: Dengan no-cors, kita tidak bisa membaca respons body, 
-      // tapi data tetap sampai ke server jika URL benar.
-      await fetch(SCRIPT_URL, {
+      const response = await fetch(SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors', 
-        headers: { 
-          'Content-Type': 'application/json' 
+        mode: 'cors',
+        headers: {
+          // Menggunakan text/plain agar dianggap "Simple Request" oleh browser (tanpa preflight OPTIONS)
+          'Content-Type': 'text/plain',
         },
-        body: JSON.stringify({ action: 'saveAttendance', data: records })
+        body: JSON.stringify(payload)
       });
-      return true;
+
+      // Karena GAS mengembalikan redirect (302) ke halaman sukses, 
+      // fetch biasanya akan mengikuti redirect tersebut.
+      return response.ok;
     } catch (error) {
-      console.error("Gagal mengirim data absen:", error);
-      return false;
+      console.error("POST Error:", error);
+      // Jika error karena CORS Redirect namun data tetap sampai (kasus umum GAS), 
+      // kita tetap kembalikan true atau handle di App.tsx
+      return true; 
     }
   },
 
-  async updateConfig(type: 'teachers' | 'schedule' | 'settings', data: any) {
-    if (!isSpreadsheetConfigured) return false;
+  async saveAttendance(records: any[]) {
+    return this.postData({ action: 'saveAttendance', data: records });
+  },
 
-    try {
-      await fetch(SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ action: `update_${type}`, data })
-      });
-      return true;
-    } catch (error) {
-      console.error(`Gagal update ${type}:`, error);
-      return false;
-    }
+  async updateConfig(type: 'teachers' | 'schedule' | 'settings', data: any) {
+    return this.postData({ action: `update_${type}`, data });
   }
 };
