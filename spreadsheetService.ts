@@ -18,12 +18,10 @@ export const spreadsheetService = {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000);
 
-      // Menambahkan timestamp untuk mencegah browser caching data lama
       const cacheBuster = `&_t=${Date.now()}`;
       const response = await fetch(`${SCRIPT_URL}?action=getAll${cacheBuster}`, {
         method: 'GET',
         signal: controller.signal,
-        // Penting: Jangan gunakan header kustom yang memicu preflight jika tidak perlu
       });
       
       clearTimeout(timeoutId);
@@ -38,11 +36,6 @@ export const spreadsheetService = {
     }
   },
 
-  /**
-   * Mengirim data ke GAS.
-   * Menggunakan Content-Type: text/plain untuk menghindari Preflight (OPTIONS) 
-   * yang sering bermasalah di GAS, namun isi tetap JSON string.
-   */
   async postData(payload: any) {
     if (!isSpreadsheetConfigured) return false;
 
@@ -51,20 +44,17 @@ export const spreadsheetService = {
         method: 'POST',
         mode: 'cors',
         headers: {
-          // Menggunakan text/plain agar dianggap "Simple Request" oleh browser (tanpa preflight OPTIONS)
           'Content-Type': 'text/plain',
         },
         body: JSON.stringify(payload)
       });
 
-      // Karena GAS mengembalikan redirect (302) ke halaman sukses, 
-      // fetch biasanya akan mengikuti redirect tersebut.
+      // GAS akan melakukan redirect 302, fetch akan mengikuti hingga ke halaman hasil
       return response.ok;
     } catch (error) {
       console.error("POST Error:", error);
-      // Jika error karena CORS Redirect namun data tetap sampai (kasus umum GAS), 
-      // kita tetap kembalikan true atau handle di App.tsx
-      return true; 
+      // Return false agar App.tsx tahu bahwa pengiriman gagal
+      return false; 
     }
   },
 
