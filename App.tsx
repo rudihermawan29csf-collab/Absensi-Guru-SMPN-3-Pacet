@@ -9,7 +9,7 @@ import AttendanceForm from './pages/AttendanceForm';
 import Layout from './components/Layout';
 import { User, UserRole, AttendanceRecord, Teacher, AppSettings, ScheduleEntry } from './pages/types';
 import { TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE } from './constants';
-import { Loader2, Database } from 'lucide-react';
+import { Loader2, Database, AlertTriangle, CloudOff } from 'lucide-react';
 
 const DEFAULT_SETTINGS: AppSettings = {
   tahunPelajaran: '2025/2026',
@@ -138,7 +138,7 @@ const App: React.FC = () => {
         <div className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-full">
           <Database size={12} className="text-slate-400" />
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest leading-none italic">
-            SIAP GURU {isLocalMode ? 'LOCAL-OFFLINE' : 'CLOUD'}
+            SIAP GURU {isLocalMode ? 'LOCAL-ONLY' : 'CLOUD-SYNC'}
           </p>
         </div>
       </div>
@@ -152,9 +152,18 @@ const App: React.FC = () => {
           <div className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-slate-800 animate-in fade-in zoom-in duration-300">
             <Loader2 size={14} className="text-indigo-400 animate-spin" />
             <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-              {isLocalMode ? 'Menyimpan di Browser...' : 'Sinkronisasi Cloud...'}
+              {isLocalMode ? 'Menyimpan di HP ini...' : 'Mengirim ke Server...'}
             </span>
           </div>
+        </div>
+      )}
+
+      {isLocalMode && user && (
+        <div className="bg-amber-500 text-white py-2 px-6 flex items-center justify-center gap-3 animate-in slide-in-from-top duration-500 sticky top-0 z-[60]">
+           <CloudOff size={14} />
+           <p className="text-[10px] font-black uppercase tracking-widest">
+             Mode Lokal Aktif: Data tidak tersinkronisasi antar-perangkat. Hubungkan API Key untuk mengaktifkan Cloud.
+           </p>
         </div>
       )}
       

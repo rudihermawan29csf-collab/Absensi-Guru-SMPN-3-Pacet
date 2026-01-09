@@ -1,14 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://ohwhmcygyonwkfszcqgl.supabase.co';
-const supabaseKey = process.env.SUPABASE_KEY || process.env.API_KEY || '';
+
+// Mengambil kunci dari environment variable yang disediakan sistem
+const supabaseKey = process.env.API_KEY || '';
 
 /**
  * Mock Client yang mensimulasikan API Supabase menggunakan LocalStorage.
- * Digunakan saat API Key belum dikonfigurasi agar aplikasi tetap fungsional.
+ * Digunakan saat API Key belum dikonfigurasi agar aplikasi tetap fungsional secara lokal.
  */
 const createLocalStorageClient = () => {
-  console.warn("SIAP GURU: Menggunakan Mode Lokal (Penyimpanan Browser) karena API Key Cloud belum dikonfigurasi.");
+  console.warn("SIAP GURU: Berjalan dalam MODE LOKAL. Data tidak akan tersinkronisasi antar-perangkat.");
   
   const mockFrom = (table: string) => ({
     select: (query?: string) => {
@@ -25,7 +27,6 @@ const createLocalStorageClient = () => {
           }
         }),
         order: () => Promise.resolve({ data, error: null }),
-        // Memungkinkan pemanggilan langsung .then() atau await
         then: (cb: any) => cb({ data, error: null })
       };
       return response;
@@ -36,7 +37,7 @@ const createLocalStorageClient = () => {
       const items = Array.isArray(payload) ? payload : [payload];
       
       items.forEach(item => {
-        const idField = table === 'config' ? 'id' : 'id';
+        const idField = 'id';
         const idx = existing.findIndex((e: any) => e[idField] === item[idField]);
         if (idx >= 0) existing[idx] = { ...existing[idx], ...item };
         else existing.push(item);
@@ -51,10 +52,12 @@ const createLocalStorageClient = () => {
   return {
     from: mockFrom,
     channel: () => ({ on: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }) }),
-    isLocal: true // Penanda bahwa ini adalah mock
+    isLocal: true,
+    auth: { getUser: () => ({ data: { user: null } }) }
   } as any;
 };
 
+// Inisialisasi: Jika kunci ada, gunakan client asli (Cloud), jika tidak gunakan Local (Lokal)
 export const supabase = supabaseKey ? createClient(supabaseUrl, supabaseKey) : createLocalStorageClient();
 
 export const subscribeToTable = (table: string, callback: (payload: any) => void) => {
