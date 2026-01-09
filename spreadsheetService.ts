@@ -1,7 +1,7 @@
 /**
  * LAYANAN GOOGLE SPREADSHEET
  * 
- * Versi Sinkronisasi Handal (Anti-Cache & Anti-CORS Error)
+ * Versi Sinkronisasi Handal (Anti-CORS False Alarms)
  */
 
 const SCRIPT_URL: string = "https://script.google.com/macros/s/AKfycbzDANrhGzWTVLqEHzmqOKPCWZOUVHJqbK2Y3SbDq3WAbRbukHfTTnCkHwvvIIBX9CpU/exec";
@@ -21,6 +21,8 @@ export const spreadsheetService = {
       const cacheBuster = `&_t=${Date.now()}`;
       const response = await fetch(`${SCRIPT_URL}?action=getAll${cacheBuster}`, {
         method: 'GET',
+        // GET harus tetap CORS agar kita bisa membaca data JSON-nya
+        mode: 'cors',
         signal: controller.signal,
       });
       
@@ -36,24 +38,31 @@ export const spreadsheetService = {
     }
   },
 
+  /**
+   * Mengirim data ke GAS.
+   * MENGGUNAKAN no-cors:
+   * Google Apps Script sering mengembalikan 302 Redirect setelah POST.
+   * Fetch standar (CORS) akan menganggap redirect tanpa header CORS sebagai error.
+   * 'no-cors' akan mengirim data secara "fire and forget".
+   */
   async postData(payload: any) {
     if (!isSpreadsheetConfigured) return false;
 
     try {
-      const response = await fetch(SCRIPT_URL, {
+      await fetch(SCRIPT_URL, {
         method: 'POST',
-        mode: 'cors',
+        mode: 'no-cors', // Menghindari pengecekan CORS pada redirect
         headers: {
           'Content-Type': 'text/plain',
         },
         body: JSON.stringify(payload)
       });
 
-      // GAS akan melakukan redirect 302, fetch akan mengikuti hingga ke halaman hasil
-      return response.ok;
+      // Dalam mode no-cors, kita tidak bisa membaca response.ok.
+      // Jika fetch tidak melempar error (throw), kita asumsikan permintaan terkirim.
+      return true;
     } catch (error) {
-      console.error("POST Error:", error);
-      // Return false agar App.tsx tahu bahwa pengiriman gagal
+      console.error("Network Error (Real):", error);
       return false; 
     }
   },

@@ -18,7 +18,6 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const App: React.FC = () => {
-  // Ref untuk melacak apakah sedang menyimpan (mencegah loadData menimpa data yang sedang dikirim)
   const isSavingRef = useRef(false);
 
   const [user, setUser] = useState<User | null>(() => {
@@ -30,7 +29,6 @@ const App: React.FC = () => {
     }
   });
 
-  // Inisialisasi data dari cache lokal agar tidak kosong di awal
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>(() => {
     try {
       const cached = localStorage.getItem('spn3_cached_data');
@@ -89,7 +87,6 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'synced' | 'offline' | 'error'>('synced');
 
   const loadData = useCallback(async (isManual = false) => {
-    // JANGAN load data jika sedang dalam proses simpan (menghindari data cloud yang lama menimpa data baru)
     if (isSavingRef.current) return;
     if (!isSpreadsheetConfigured) {
       setIsLoading(false);
@@ -102,7 +99,6 @@ const App: React.FC = () => {
     try {
       const result = await spreadsheetService.getAllData();
       
-      // Validasi agar data cloud tidak menimpa data lokal jika cloud mengirim data kosong yang mencurigakan
       if (result && typeof result === 'object' && !isSavingRef.current) {
         if (Array.isArray(result.attendance)) setAttendanceData(result.attendance);
         if (Array.isArray(result.teachers) && result.teachers.length > 0) setTeachers(result.teachers);
@@ -123,7 +119,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(() => loadData(true), 3 * 60 * 1000); // Tiap 3 menit
+    const interval = setInterval(() => loadData(true), 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -141,43 +137,46 @@ const App: React.FC = () => {
     setIsSaving(true);
     isSavingRef.current = true;
     
-    try {
-      // 1. Update state lokal segera
-      let updatedAttendance: AttendanceRecord[] = [];
-      setAttendanceData(prev => {
-        const updated = [...prev];
-        newRecords.forEach(rec => {
-          const idx = updated.findIndex(a => a.id === rec.id);
-          if (idx > -1) updated[idx] = rec;
-          else updated.push(rec);
-        });
-        updatedAttendance = updated;
-        return updated;
+    // 1. Update state lokal + cache segera agar data tidak hilang dari layar
+    let updatedAttendance: AttendanceRecord[] = [];
+    setAttendanceData(prev => {
+      const updated = [...prev];
+      newRecords.forEach(rec => {
+        const idx = updated.findIndex(a => a.id === rec.id);
+        if (idx > -1) updated[idx] = rec;
+        else updated.push(rec);
       });
+      updatedAttendance = updated;
+      return updated;
+    });
 
-      // 2. Backup ke localStorage segera (PENTING!)
-      const currentCache = JSON.parse(localStorage.getItem('spn3_cached_data') || '{}');
-      localStorage.setItem('spn3_cached_data', JSON.stringify({
-        ...currentCache,
-        attendance: updatedAttendance
-      }));
+    const currentCache = JSON.parse(localStorage.getItem('spn3_cached_data') || '{}');
+    localStorage.setItem('spn3_cached_data', JSON.stringify({
+      ...currentCache,
+      attendance: updatedAttendance
+    }));
 
-      // 3. Kirim ke cloud
+    try {
+      // 2. Kirim ke cloud dengan mode 'no-cors' (lebih handal untuk GAS)
       const success = await spreadsheetService.saveAttendance(newRecords);
-      if (!success) throw new Error("Gagal menyimpan ke Cloud");
       
-      setSyncStatus('synced');
-      setLastSync(new Date());
+      if (success) {
+        setSyncStatus('synced');
+        setLastSync(new Date());
+      } else {
+        throw new Error("Gagal terhubung ke Server");
+      }
     } catch (error) {
-      console.error("Cloud Error: Data hanya tersimpan di perangkat ini.");
       setSyncStatus('offline');
-      alert("⚠️ Koneksi gagal. Data Anda aman di perangkat ini, namun belum terkirim ke Cloud. Silakan refresh saat sinyal stabil.");
+      // Kita tidak menggunakan alert() di sini agar tidak memutus alur pengguna, 
+      // cukup status 'Offline' (Kuning) di header sebagai penanda.
+      console.warn("Cloud Sync tertunda. Data aman di lokal.");
     } finally {
-      // Tunggu sebentar sebelum membuka kunci agar cloud punya waktu untuk memproses
+      // Delay sedikit sebelum membuka kunci agar database GAS selesai menulis
       setTimeout(() => {
         setIsSaving(false);
         isSavingRef.current = false;
-      }, 2000);
+      }, 3000);
     }
   };
 
@@ -221,7 +220,7 @@ const App: React.FC = () => {
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000]">
           <div className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-slate-800 animate-in fade-in zoom-in duration-300">
             <RefreshCw size={14} className="text-indigo-400 animate-spin" />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Mengamankan Data...</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sinkronisasi Awan...</span>
           </div>
         </div>
       )}
