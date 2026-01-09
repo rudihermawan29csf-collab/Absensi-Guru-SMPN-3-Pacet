@@ -29,17 +29,8 @@ interface AdminDashboardProps {
 type AdminTab = 'overview' | 'monitoring' | 'permits' | 'agenda' | 'teachers' | 'schedule' | 'settings';
 type TimeFilter = 'harian' | 'mingguan' | 'bulanan' | 'semester';
 
-// Fix: Correctly define the AIStudio interface to avoid type conflicts in the global window object.
-interface AIStudio {
-  hasSelectedApiKey(): Promise<boolean>;
-  openSelectKey(): Promise<void>;
-}
-
-declare global {
-  interface Window {
-    aistudio: AIStudio;
-  }
-}
+// Fix: Removed redundant interface AIStudio and declare global { Window } 
+// as it conflicts with pre-existing global declarations in the environment.
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ 
   data, teachers, setTeachers, schedule, setSchedule, settings, setSettings, onSaveAttendance 
@@ -69,7 +60,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     date: new Date().toISOString().split('T')[0],
     teacherId: '',
     status: AttendanceStatus.IZIN,
-    note: 'Izin keperluan keluarga'
+    note: 'Izin keperluan keluarga',
+    type: 'FULL_DAY', // FULL_DAY atau SPECIFIC_HOURS
+    affected_jams: [] as string[]
   });
 
   const isLocalMode = (supabase as any).isLocal;
@@ -78,8 +71,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleOpenKeySelector = async () => {
     try {
-      if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-        await window.aistudio.openSelectKey();
+      // Use type assertion to access aistudio safely without global declaration conflict
+      const aiStudio = (window as any).aistudio;
+      if (aiStudio && typeof aiStudio.openSelectKey === 'function') {
+        await aiStudio.openSelectKey();
         window.location.reload();
       } else {
         alert('Fitur pemilihan kunci tidak tersedia di lingkungan ini.');
@@ -89,7 +84,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Helper: Get periods for specific date in agenda
+  // Helper: Get periods for specific date
   const getPeriodsForDate = (dateStr: string) => {
     const d = new Date(dateStr);
     const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUM\'AT', 'SABTU'];
@@ -153,13 +148,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleGenerateAiInsight = async () => {
     setIsAnalyzing(true);
     try {
-      // Fix: Creating a new GoogleGenAI instance inside the function as recommended for Gemini 3.
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: `Berikan ringkasan eksekutif profesional mengenai data absensi SMPN 3 Pacet periode ${timeFilter}. Statistik: Hadir ${stats.hadir}, Izin ${stats.izin}, Alpha ${stats.alpha}. Berikan rekomendasi untuk peningkatan disiplin.`,
       });
-      // Fix: Using the .text property directly (not a method call).
       setAiInsight(response.text || 'Gagal memperoleh analisa cerdas.');
     } catch (err) {
       setAiInsight('Layanan analisa AI sedang tidak tersedia.');
@@ -194,10 +187,25 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleApplyPermit = async () => {
     if (!permitForm.teacherId || !permitForm.date) return;
+    
+    // Validasi jam jika memilih jam tertentu
+    if (permitForm.type === 'SPECIFIC_HOURS' && permitForm.affected_jams.length === 0) {
+      alert('Silakan pilih jam mengajar yang akan diizinkan.');
+      return;
+    }
+
     const d = new Date(permitForm.date);
     const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUM\'AT', 'SABTU'];
     const selectedDay = dayNames[d.getDay()];
-    const teacherSchedule = schedule.filter(s => s.hari === selectedDay && s.kegiatan === 'KBM');
+    
+    // Ambil jadwal guru hari itu
+    let teacherSchedule = schedule.filter(s => s.hari === selectedDay && s.kegiatan === 'KBM');
+    
+    // Jika jam tertentu, filter jadwal hanya yang dipilih
+    if (permitForm.type === 'SPECIFIC_HOURS') {
+      teacherSchedule = teacherSchedule.filter(s => permitForm.affected_jams.includes(s.jam));
+    }
+
     const records: AttendanceRecord[] = [];
     const teacher = teachers.find(t => t.id === permitForm.teacherId);
 
@@ -222,13 +230,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
 
     if (records.length === 0) {
-      alert('Guru tidak memiliki jadwal mengajar di tanggal tersebut.');
+      alert('Guru tidak memiliki jadwal mengajar di jam/tanggal tersebut.');
       return;
     }
 
     try {
       await onSaveAttendance(records);
       alert(`Berhasil menginput ${records.length} jam izin untuk ${teacher?.nama}`);
+      // Reset form jams setelah sukses
+      setPermitForm(prev => ({ ...prev, affected_jams: [] }));
     } catch (err) {
       alert('Gagal menyimpan izin.');
     }
@@ -425,11 +435,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'permits' && (
         <div className="max-w-4xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
            <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
-              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><ShieldCheck size={24} className="text-indigo-600"/> Input Izin Guru (Masal)</h3>
+              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><ShieldCheck size={24} className="text-indigo-600"/> Input Izin Guru</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                  <div>
                     <label className="text-[10px] font-black text-slate-400 mb-2 block uppercase">Tanggal Izin</label>
-                    <input type="date" className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={permitForm.date} onChange={e => setPermitForm({...permitForm, date: e.target.value})}/>
+                    <input type="date" className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={permitForm.date} onChange={e => setPermitForm({...permitForm, date: e.target.value, affected_jams: []})}/>
                  </div>
                  <div>
                     <label className="text-[10px] font-black text-slate-400 mb-2 block uppercase">Pilih Guru</label>
@@ -446,12 +456,44 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </select>
                  </div>
                  <div>
-                    <label className="text-[10px] font-black text-slate-400 mb-2 block uppercase">Keterangan</label>
+                    <label className="text-[10px] font-black text-slate-400 mb-2 block uppercase">Jangkauan Izin</label>
+                    <select className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={permitForm.type} onChange={e => setPermitForm({...permitForm, type: e.target.value as any, affected_jams: []})}>
+                       <option value="FULL_DAY">SELURUH HARI (FULL)</option>
+                       <option value="SPECIFIC_HOURS">JAM TERTENTU</option>
+                    </select>
+                 </div>
+                 <div className="md:col-span-2">
+                    <label className="text-[10px] font-black text-slate-400 mb-2 block uppercase">Keterangan / Alasan</label>
                     <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={permitForm.note} onChange={e => setPermitForm({...permitForm, note: e.target.value})} placeholder="Alasan izin..."/>
                  </div>
               </div>
+
+              {/* Checklist Jam Khusus untuk Izin */}
+              {permitForm.type === 'SPECIFIC_HOURS' && (
+                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8 animate-in zoom-in duration-300">
+                   <p className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Pilih Jam Mengajar:</p>
+                   <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 gap-2">
+                      {getPeriodsForDate(permitForm.date).map(jam => (
+                        <label key={jam} className={`flex flex-col items-center justify-center p-4 rounded-2xl border transition-all cursor-pointer ${permitForm.affected_jams.includes(jam) ? 'bg-indigo-600 text-white border-indigo-700 shadow-md scale-95' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
+                           <input 
+                             type="checkbox" 
+                             className="hidden" 
+                             checked={permitForm.affected_jams.includes(jam)}
+                             onChange={e => {
+                               const current = permitForm.affected_jams;
+                               const updated = e.target.checked ? [...current, jam] : current.filter(j => j !== jam);
+                               setPermitForm({...permitForm, affected_jams: updated});
+                             }}
+                           />
+                           <span className="text-xs font-black">JAM {jam}</span>
+                        </label>
+                      ))}
+                   </div>
+                </div>
+              )}
+
               <button onClick={handleApplyPermit} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
-                 <Save size={18}/> Terapkan ke Semua Jam Mengajar
+                 <Save size={18}/> Terbitkan Surat Izin Digital
               </button>
            </div>
         </div>
