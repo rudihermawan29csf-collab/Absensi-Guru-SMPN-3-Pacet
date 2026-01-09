@@ -76,10 +76,17 @@ const App: React.FC = () => {
     const channelConfig = subscribeToTable('config', () => fetchData());
 
     return () => {
-      supabase.removeChannel(channelAtt);
-      supabase.removeChannel(channelTeach);
-      supabase.removeChannel(channelSched);
-      supabase.removeChannel(channelConfig);
+      // Pastikan channel ada sebelum dihapus (untuk menangani proxy safe client)
+      if (channelAtt && typeof channelAtt.unsubscribe === 'function') channelAtt.unsubscribe();
+      if (channelTeach && typeof channelTeach.unsubscribe === 'function') channelTeach.unsubscribe();
+      if (channelSched && typeof channelSched.unsubscribe === 'function') channelSched.unsubscribe();
+      if (channelConfig && typeof channelConfig.unsubscribe === 'function') channelConfig.unsubscribe();
+      
+      // Fallback untuk RealtimeChannel Supabase asli
+      if (channelAtt && supabase.removeChannel) supabase.removeChannel(channelAtt);
+      if (channelTeach && supabase.removeChannel) supabase.removeChannel(channelTeach);
+      if (channelSched && supabase.removeChannel) supabase.removeChannel(channelSched);
+      if (channelConfig && supabase.removeChannel) supabase.removeChannel(channelConfig);
     };
   }, []);
 
