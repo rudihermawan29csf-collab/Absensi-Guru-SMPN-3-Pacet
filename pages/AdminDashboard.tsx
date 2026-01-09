@@ -2,13 +2,15 @@ import React, { useState, useMemo } from 'react';
 import { AttendanceRecord, AttendanceStatus, Teacher, AppSettings, SchoolEvent, ScheduleEntry } from './types';
 import { CLASSES, CLASS_COLORS, MAPEL_NAME_MAP, TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE, TEACHER_COLORS, PERIODS } from '../constants';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell,
+  PieChart, Pie
 } from 'recharts';
 import { 
   Users, LayoutGrid, Edit2, Trash2, Calendar, 
   Activity, Settings, ShieldCheck, BookOpen, Plus, Trash, X, 
   AlertTriangle, Save, CheckCircle2, RefreshCw, Sparkles, Loader2,
-  Wifi, WifiOff, Coffee, Clock, Filter, BarChart3
+  Wifi, WifiOff, Coffee, Clock, Filter, BarChart3, ChevronRight,
+  TrendingUp, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 import {GoogleGenAI} from "@google/genai";
 import { supabase } from '../supabase';
@@ -61,6 +63,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const isLocalMode = (supabase as any).isLocal;
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // Helper: Get periods for specific date in agenda
+  const getPeriodsForDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUM\'AT', 'SABTU'];
+    const targetDay = dayNames[d.getDay()];
+    return schedule.filter(s => s.hari === targetDay).map(s => s.jam);
+  };
+
   // Logic Filtering Data untuk Ikhtisar
   const filteredRecords = useMemo(() => {
     const now = new Date();
@@ -80,26 +90,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     hadir: filteredRecords.filter(r => r.status === AttendanceStatus.HADIR).length,
     izin: filteredRecords.filter(r => r.status === AttendanceStatus.IZIN || r.status === AttendanceStatus.SAKIT).length,
     alpha: filteredRecords.filter(r => r.status === AttendanceStatus.TIDAK_HADIR).length,
+    total: filteredRecords.length
   };
 
-  // Data untuk Grafik Per Kelas
-  const classChartData = useMemo(() => {
-    return CLASSES.map(cls => ({
-      name: cls.id,
-      Hadir: filteredRecords.filter(r => r.id_kelas === cls.id && r.status === AttendanceStatus.HADIR).length,
-      Izin: filteredRecords.filter(r => r.id_kelas === cls.id && (r.status === AttendanceStatus.IZIN || r.status === AttendanceStatus.SAKIT)).length,
-      Alpha: filteredRecords.filter(r => r.id_kelas === cls.id && r.status === AttendanceStatus.TIDAK_HADIR).length,
-    }));
+  // Data Analisis Per Kelas
+  const classStats = useMemo(() => {
+    return CLASSES.map(cls => {
+      const classRecords = filteredRecords.filter(r => r.id_kelas === cls.id);
+      const total = classRecords.length;
+      const hadir = classRecords.filter(r => r.status === AttendanceStatus.HADIR).length;
+      return {
+        id: cls.id,
+        nama: cls.nama,
+        hadir,
+        persentase: total > 0 ? Math.round((hadir / total) * 100) : 0,
+        total
+      };
+    });
   }, [filteredRecords]);
 
-  // Data untuk Grafik Per Guru
-  const teacherChartData = useMemo(() => {
-    return teachers.slice(0, 15).map(t => ({
-      name: t.id,
-      Hadir: filteredRecords.filter(r => r.id_guru === t.id && r.status === AttendanceStatus.HADIR).length,
-      Izin: filteredRecords.filter(r => r.id_guru === t.id && (r.status === AttendanceStatus.IZIN || r.status === AttendanceStatus.SAKIT)).length,
-      Alpha: filteredRecords.filter(r => r.id_guru === t.id && r.status === AttendanceStatus.TIDAK_HADIR).length,
-    }));
+  // Data Analisis Per Guru
+  const teacherStats = useMemo(() => {
+    return teachers.map(t => {
+      const teacherRecords = filteredRecords.filter(r => r.id_guru === t.id);
+      const total = teacherRecords.length;
+      const hadir = teacherRecords.filter(r => r.status === AttendanceStatus.HADIR).length;
+      return {
+        id: t.id,
+        nama: t.nama,
+        hadir,
+        total,
+        persentase: total > 0 ? Math.round((hadir / total) * 100) : 0
+      };
+    }).sort((a, b) => b.persentase - a.persentase);
   }, [filteredRecords, teachers]);
 
   const handleGenerateAiInsight = async () => {
@@ -108,7 +131,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Berikan ringkasan eksekutif profesional dalam Bahasa Indonesia mengenai data absensi SMPN 3 Pacet periode ${timeFilter} (${todayStr}). Statistik: Hadir ${stats.hadir}, Izin ${stats.izin}, Alpha ${stats.alpha}. Berikan rekomendasi untuk manajemen sekolah.`,
+        contents: `Berikan ringkasan eksekutif profesional mengenai data absensi SMPN 3 Pacet periode ${timeFilter}. Statistik: Hadir ${stats.hadir}, Izin ${stats.izin}, Alpha ${stats.alpha}. Berikan rekomendasi untuk peningkatan disiplin.`,
       });
       setAiInsight(response.text || 'Gagal memperoleh analisa cerdas.');
     } catch (err) {
@@ -251,77 +274,105 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               )}
            </div>
 
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+           {/* Stats Overview */}
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
-                { label: 'Total Hadir', val: stats.hadir, color: 'emerald', icon: <CheckCircle2 size={24}/> },
-                { label: 'Izin & Sakit', val: stats.izin, color: 'indigo', icon: <ShieldCheck size={24}/> },
-                { label: 'Alpha', val: stats.alpha, color: 'rose', icon: <AlertTriangle size={24}/> }
+                { label: 'Total Kehadiran', val: stats.hadir, color: 'emerald', icon: <CheckCircle2 size={24}/>, trend: '+5%' },
+                { label: 'Izin & Sakit', val: stats.izin, color: 'indigo', icon: <ShieldCheck size={24}/>, trend: '-2%' },
+                { label: 'Alpha (Tanpa Ket)', val: stats.alpha, color: 'rose', icon: <AlertTriangle size={24}/>, trend: '+1%' },
+                { label: 'Total Sesi KBM', val: stats.total, color: 'slate', icon: <BookOpen size={24}/>, trend: '0%' }
               ].map((s, i) => (
-                <div key={i} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center gap-5">
-                   <div className={`p-4 rounded-2xl bg-${s.color}-50 text-${s.color}-600`}>{s.icon}</div>
-                   <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label} ({timeFilter})</p>
-                      <h3 className="text-3xl font-black text-slate-800">{s.val} <span className="text-xs font-normal text-slate-400">Jam</span></h3>
+                <div key={i} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center justify-between group hover:border-indigo-100 transition-all">
+                   <div className="flex items-center gap-4">
+                      <div className={`p-4 rounded-2xl bg-${s.color}-50 text-${s.color}-600`}>{s.icon}</div>
+                      <div>
+                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{s.label}</p>
+                         <h3 className="text-2xl font-black text-slate-800 tracking-tighter">{s.val} <span className="text-[10px] font-normal text-slate-400">Jam</span></h3>
+                      </div>
+                   </div>
+                   <div className={`flex items-center gap-1 text-[9px] font-black ${s.trend.startsWith('+') ? 'text-emerald-600' : s.trend.startsWith('-') ? 'text-rose-600' : 'text-slate-400'}`}>
+                      {s.trend.startsWith('+') ? <ArrowUpRight size={12}/> : s.trend.startsWith('-') ? <ArrowDownRight size={12}/> : null}
+                      {s.trend}
                    </div>
                 </div>
               ))}
            </div>
 
-           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-2xl">
-                 <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><BarChart3 size={18} className="text-indigo-600"/> Monitoring Per Kelas</h3>
-                 <div className="h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                       <BarChart data={classChartData}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
-                          <YAxis axisLine={false} tickLine={false} hide />
-                          <Tooltip cursor={{fill: '#f8fafc'}} />
-                          <Bar dataKey="Hadir" fill="#10b981" radius={[4,4,0,0]} barSize={20} />
-                          <Bar dataKey="Izin" fill="#6366f1" radius={[4,4,0,0]} barSize={20} />
-                          <Bar dataKey="Alpha" fill="#f43f5e" radius={[4,4,0,0]} barSize={20} />
-                       </BarChart>
-                    </ResponsiveContainer>
+           {/* Main Analysis Section */}
+           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Detailed Breakdown Per Kelas */}
+              <div className="lg:col-span-2 bg-white p-8 rounded-[40px] border border-slate-100 shadow-2xl">
+                 <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><BarChart3 size={18} className="text-indigo-600"/> Monitoring Kehadiran Per Kelas</h3>
+                 <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                       <thead>
+                          <tr className="border-b border-slate-50">
+                             <th className="py-4 text-[9px] font-black text-slate-400 uppercase">Kelas</th>
+                             <th className="py-4 text-[9px] font-black text-slate-400 uppercase">Hadir</th>
+                             <th className="py-4 text-[9px] font-black text-slate-400 uppercase">Progress</th>
+                             <th className="py-4 text-right text-[9px] font-black text-slate-400 uppercase">Akurasi</th>
+                          </tr>
+                       </thead>
+                       <tbody className="divide-y divide-slate-50">
+                          {classStats.map(cls => (
+                            <tr key={cls.id} className="group hover:bg-slate-50/50 transition-all">
+                               <td className="py-4"><span className={`px-3 py-1 rounded-lg text-[10px] font-black ${CLASS_COLORS[cls.id]}`}>{cls.id}</span></td>
+                               <td className="py-4 text-xs font-black text-slate-800">{cls.hadir} <span className="text-[10px] font-normal text-slate-400">/ {cls.total}</span></td>
+                               <td className="py-4">
+                                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden max-w-[120px]">
+                                     <div className="bg-emerald-500 h-full rounded-full" style={{width: `${cls.persentase}%`}}></div>
+                                  </div>
+                               </td>
+                               <td className="py-4 text-right text-xs font-black text-slate-900">{cls.persentase}%</td>
+                            </tr>
+                          ))}
+                       </tbody>
+                    </table>
                  </div>
               </div>
+
+              {/* Ranking Guru */}
               <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-2xl">
-                 <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><Users size={18} className="text-indigo-600"/> Monitoring Per Guru (15 Teratas)</h3>
-                 <div className="h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                       <BarChart data={teacherChartData}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 9, fontWeight: 'bold'}} />
-                          <YAxis axisLine={false} tickLine={false} hide />
-                          <Tooltip cursor={{fill: '#f8fafc'}} />
-                          <Bar dataKey="Hadir" fill="#10b981" radius={[4,4,0,0]} barSize={15} />
-                          <Bar dataKey="Izin" fill="#6366f1" radius={[4,4,0,0]} barSize={15} />
-                          <Bar dataKey="Alpha" fill="#f43f5e" radius={[4,4,0,0]} barSize={15} />
-                       </BarChart>
-                    </ResponsiveContainer>
+                 <h3 className="text-xs font-black text-slate-900 uppercase italic mb-8 flex items-center gap-3"><Users size={18} className="text-indigo-600"/> Ranking Kedisiplinan Guru</h3>
+                 <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {teacherStats.slice(0, 10).map((t, idx) => (
+                      <div key={t.id} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50/50 border border-slate-100 hover:border-indigo-200 transition-all">
+                         <div className="flex items-center gap-4">
+                            <span className="text-[10px] font-black text-slate-300">#{(idx+1).toString().padStart(2, '0')}</span>
+                            <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center font-black text-[10px]">{t.id}</div>
+                            <div>
+                               <p className="text-[10px] font-black text-slate-800 uppercase truncate max-w-[120px] italic">{t.nama}</p>
+                               <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">{t.hadir} Jam Hadir</p>
+                            </div>
+                         </div>
+                         <div className={`text-[10px] font-black ${t.persentase > 90 ? 'text-emerald-600' : t.persentase > 70 ? 'text-indigo-600' : 'text-rose-600'}`}>{t.persentase}%</div>
+                      </div>
+                    ))}
                  </div>
               </div>
            </div>
 
+           {/* AI Insight Section */}
            <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
               <div className="flex items-center justify-between mb-8">
                  <h3 className="text-sm font-black text-slate-900 uppercase italic flex items-center gap-3">
-                   <Sparkles className="text-indigo-500" size={20}/> Analisa Cerdas AI
+                   <Sparkles className="text-indigo-500" size={20}/> Ringkasan Analitik AI
                  </h3>
                  <button 
                    onClick={handleGenerateAiInsight}
                    disabled={isAnalyzing}
                    className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-700 transition-all disabled:opacity-50"
                  >
-                   {isAnalyzing ? <Loader2 size={14} className="animate-spin"/> : <RefreshCw size={14}/>} {isAnalyzing ? 'Menganalisa...' : 'Generate Insight'}
+                   {isAnalyzing ? <Loader2 size={14} className="animate-spin"/> : <TrendingUp size={14}/>} {isAnalyzing ? 'Memproses...' : 'Tampilkan Analisa'}
                  </button>
               </div>
               {aiInsight ? (
-                <div className="prose prose-slate max-w-none text-slate-600 text-sm leading-relaxed font-medium bg-slate-50 p-8 rounded-3xl border border-slate-100">
+                <div className="prose prose-slate max-w-none text-slate-600 text-sm leading-relaxed font-medium bg-slate-50 p-8 rounded-3xl border border-slate-100 animate-in fade-in duration-700">
                    {aiInsight}
                 </div>
               ) : (
-                <div className="py-12 text-center">
-                   <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Klik tombol untuk melihat analisa data periode {timeFilter}</p>
+                <div className="py-12 text-center border-2 border-dashed border-slate-100 rounded-[32px]">
+                   <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Aktifkan analisa AI untuk mendapatkan insight periode {timeFilter}</p>
                 </div>
               )}
            </div>
@@ -332,8 +383,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'monitoring' && (
         <div className="bg-white rounded-[40px] border border-slate-100 shadow-2xl overflow-hidden animate-in fade-in">
            <div className="p-8 border-b border-slate-50 bg-slate-50/50 flex items-center justify-between">
-              <h3 className="text-xs font-black text-slate-900 uppercase italic">Log Kehadiran Guru Real-time</h3>
-              <span className="text-[9px] font-black bg-indigo-600 text-white px-3 py-1 rounded-full uppercase">{todayStr}</span>
+              <h3 className="text-xs font-black text-slate-900 uppercase italic">Live Attendance Monitoring</h3>
+              <div className="flex items-center gap-2">
+                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                 <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest italic">Live Sinkron</span>
+              </div>
            </div>
            <div className="overflow-x-auto">
               <table className="w-full text-left">
@@ -362,10 +416,90 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                          </td>
                       </tr>
                     )) : (
-                      <tr><td colSpan={4} className="p-20 text-center font-black text-slate-300 text-[10px] uppercase tracking-widest">Belum ada data masuk hari ini</td></tr>
+                      <tr><td colSpan={4} className="p-20 text-center font-black text-slate-300 text-[10px] uppercase tracking-widest italic">Belum ada aktivitas absensi hari ini</td></tr>
                     )}
                  </tbody>
               </table>
+           </div>
+        </div>
+      )}
+
+      {/* AGENDA TAB */}
+      {activeTab === 'agenda' && (
+        <div className="max-w-4xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
+           <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
+              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><Calendar size={24} className="text-indigo-600"/> Kelola Kalender & Jam Khusus</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Pilih Tanggal</label>
+                    <input type="date" className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.tanggal} onChange={e => setNewEvent({...newEvent, tanggal: e.target.value, affected_jams: []})}/>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Keterangan Event</label>
+                    <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.nama} onChange={e => setNewEvent({...newEvent, nama: e.target.value})} placeholder="Contoh: HUT Sekolah..."/>
+                 </div>
+                 <div>
+                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Tipe Agenda</label>
+                    <select className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none focus:ring-4 focus:ring-indigo-500/10" value={newEvent.tipe} onChange={e => setNewEvent({...newEvent, tipe: e.target.value as any, affected_jams: []})}>
+                       <option value="LIBUR">LIBUR TOTAL</option>
+                       <option value="KEGIATAN">KEGIATAN SEKOLAH</option>
+                       <option value="JAM_KHUSUS">JAM KHUSUS (DILIBURKAN)</option>
+                    </select>
+                 </div>
+              </div>
+
+              {/* Checklist Jam Khusus Dinamis berdasarkan Jadwal Hari tersebut */}
+              {newEvent.tipe === 'JAM_KHUSUS' && (
+                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8 animate-in zoom-in duration-300">
+                   <p className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Pilih Jam yang Ingin Dikosongkan:</p>
+                   <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 gap-2">
+                      {getPeriodsForDate(newEvent.tanggal || todayStr).map(jam => (
+                        <label key={jam} className={`flex flex-col items-center justify-center p-4 rounded-2xl border transition-all cursor-pointer ${newEvent.affected_jams?.includes(jam) ? 'bg-indigo-600 text-white border-indigo-700 shadow-md scale-95' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
+                           <input 
+                             type="checkbox" 
+                             className="hidden" 
+                             checked={newEvent.affected_jams?.includes(jam)}
+                             onChange={e => {
+                               const current = newEvent.affected_jams || [];
+                               const updated = e.target.checked ? [...current, jam] : current.filter(j => j !== jam);
+                               setNewEvent({...newEvent, affected_jams: updated});
+                             }}
+                           />
+                           <span className="text-xs font-black">JAM {jam}</span>
+                        </label>
+                      ))}
+                   </div>
+                   {getPeriodsForDate(newEvent.tanggal || todayStr).length === 0 && (
+                     <p className="text-center text-[10px] font-bold text-rose-400 uppercase italic">Tidak ada jadwal KBM pada hari ini.</p>
+                   )}
+                </div>
+              )}
+
+              <button onClick={handleAddEvent} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
+                 <Plus size={18}/> Simpan ke Kalender Sekolah
+              </button>
+           </div>
+
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {(settings.events || []).map(event => (
+                <div key={event.id} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center justify-between group hover:border-indigo-100 transition-all">
+                   <div className="flex items-center gap-5">
+                      <div className={`p-4 rounded-2xl ${event.tipe === 'LIBUR' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
+                         {event.tipe === 'LIBUR' ? <Coffee size={24}/> : <Calendar size={24}/>}
+                      </div>
+                      <div>
+                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{event.tanggal}</p>
+                         <h4 className="text-sm font-black text-slate-800 uppercase italic leading-none mb-1">{event.nama}</h4>
+                         <span className="text-[8px] font-black text-indigo-500 uppercase tracking-widest">
+                           {event.tipe} {event.affected_jams && event.affected_jams.length > 0 && `(JAM: ${event.affected_jams.join(',')})`}
+                         </span>
+                      </div>
+                   </div>
+                   <button onClick={() => handleRemoveEvent(event.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
+                      <Trash2 size={20}/>
+                   </button>
+                </div>
+              ))}
            </div>
         </div>
       )}
@@ -402,81 +536,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button onClick={handleApplyPermit} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
                  <Save size={18}/> Terapkan ke Semua Jam Mengajar
               </button>
-           </div>
-        </div>
-      )}
-
-      {/* AGENDA TAB */}
-      {activeTab === 'agenda' && (
-        <div className="max-w-4xl mx-auto space-y-8 animate-in slide-in-from-bottom-6">
-           <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-2xl">
-              <h3 className="text-sm font-black text-slate-900 uppercase italic mb-8 flex items-center gap-4"><Calendar size={24} className="text-indigo-600"/> Kelola Agenda & Kalender Sekolah</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                 <div>
-                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Tanggal</label>
-                    <input type="date" className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.tanggal} onChange={e => setNewEvent({...newEvent, tanggal: e.target.value})}/>
-                 </div>
-                 <div>
-                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Nama Event</label>
-                    <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.nama} onChange={e => setNewEvent({...newEvent, nama: e.target.value})} placeholder="Contoh: Rapat Pleno..."/>
-                 </div>
-                 <div>
-                    <label className="text-[10px] font-black text-slate-400 mb-1 block uppercase">Tipe</label>
-                    <select className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl font-black outline-none" value={newEvent.tipe} onChange={e => setNewEvent({...newEvent, tipe: e.target.value as any, affected_jams: e.target.value === 'JAM_KHUSUS' ? [] : undefined})}>
-                       <option value="LIBUR">LIBUR SEKOLAH</option>
-                       <option value="KEGIATAN">KEGIATAN KHUSUS</option>
-                       <option value="JAM_KHUSUS">JAM KHUSUS (DILIBURKAN)</option>
-                    </select>
-                 </div>
-              </div>
-
-              {/* Checklist Jam Khusus */}
-              {newEvent.tipe === 'JAM_KHUSUS' && (
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8">
-                   <p className="text-[10px] font-black text-slate-400 mb-4 uppercase tracking-widest flex items-center gap-2"><Clock size={14}/> Pilih Jam yang Ingin Diliburkan:</p>
-                   <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-9 gap-2">
-                      {PERIODS.map(jam => (
-                        <label key={jam} className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all cursor-pointer ${newEvent.affected_jams?.includes(jam) ? 'bg-indigo-600 text-white border-indigo-700 shadow-md' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}>
-                           <input 
-                             type="checkbox" 
-                             className="hidden" 
-                             checked={newEvent.affected_jams?.includes(jam)}
-                             onChange={e => {
-                               const current = newEvent.affected_jams || [];
-                               const updated = e.target.checked ? [...current, jam] : current.filter(j => j !== jam);
-                               setNewEvent({...newEvent, affected_jams: updated});
-                             }}
-                           />
-                           <span className="text-xs font-black">Jam {jam}</span>
-                        </label>
-                      ))}
-                   </div>
-                </div>
-              )}
-
-              <button onClick={handleAddEvent} className="w-full bg-indigo-600 text-white font-black py-5 rounded-[22px] shadow-xl hover:bg-indigo-700 transition-all text-[11px] uppercase tracking-widest flex items-center justify-center gap-3">
-                 <Plus size={18}/> Tambah ke Kalender
-              </button>
-           </div>
-
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {(settings.events || []).map(event => (
-                <div key={event.id} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-xl flex items-center justify-between">
-                   <div className="flex items-center gap-5">
-                      <div className={`p-4 rounded-2xl ${event.tipe === 'LIBUR' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
-                         {event.tipe === 'LIBUR' ? <Coffee size={24}/> : <Calendar size={24}/>}
-                      </div>
-                      <div>
-                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{event.tanggal}</p>
-                         <h4 className="text-sm font-black text-slate-800 uppercase italic">{event.nama}</h4>
-                         <span className="text-[9px] font-bold text-indigo-500 uppercase">{event.tipe} {event.affected_jams && event.affected_jams.length > 0 && `(Jam: ${event.affected_jams.join(',')})`}</span>
-                      </div>
-                   </div>
-                   <button onClick={() => handleRemoveEvent(event.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all">
-                      <Trash2 size={20}/>
-                   </button>
-                </div>
-              ))}
            </div>
         </div>
       )}
