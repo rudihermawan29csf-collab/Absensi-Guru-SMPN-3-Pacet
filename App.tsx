@@ -29,6 +29,7 @@ const App: React.FC = () => {
     }
   });
 
+  // State inisialisasi dari localStorage (Jangkar Utama)
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>(() => {
     try {
       const cached = localStorage.getItem('spn3_cached_data');
@@ -110,7 +111,7 @@ const App: React.FC = () => {
         localStorage.setItem('spn3_cached_data', JSON.stringify(result));
       }
     } catch (err) {
-      console.warn("Sinkronisasi gagal, menggunakan data lokal.");
+      console.warn("Gagal menarik data cloud, menggunakan data lokal.");
       setSyncStatus('error');
     } finally {
       setIsLoading(false);
@@ -119,6 +120,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    // Interval 5 menit untuk sinkronisasi otomatis
     const interval = setInterval(() => loadData(true), 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [loadData]);
@@ -134,10 +136,10 @@ const App: React.FC = () => {
   };
 
   const saveAttendanceBulk = async (newRecords: AttendanceRecord[]) => {
+    // 1. LANGSUNG SIMPAN KE LOKAL (Instant UX)
     setIsSaving(true);
     isSavingRef.current = true;
     
-    // 1. Update state lokal + cache segera agar data tidak hilang dari layar
     let updatedAttendance: AttendanceRecord[] = [];
     setAttendanceData(prev => {
       const updated = [...prev];
@@ -156,27 +158,26 @@ const App: React.FC = () => {
       attendance: updatedAttendance
     }));
 
+    // 2. KIRIM KE CLOUD DI LATAR BELAKANG
     try {
-      // 2. Kirim ke cloud dengan mode 'no-cors' (lebih handal untuk GAS)
+      // Kita tidak melempar error meskipun jaringan bermasalah di sini,
+      // karena data sudah aman di localStorage.
       const success = await spreadsheetService.saveAttendance(newRecords);
       
       if (success) {
         setSyncStatus('synced');
         setLastSync(new Date());
       } else {
-        throw new Error("Gagal terhubung ke Server");
+        setSyncStatus('offline');
       }
     } catch (error) {
       setSyncStatus('offline');
-      // Kita tidak menggunakan alert() di sini agar tidak memutus alur pengguna, 
-      // cukup status 'Offline' (Kuning) di header sebagai penanda.
-      console.warn("Cloud Sync tertunda. Data aman di lokal.");
     } finally {
-      // Delay sedikit sebelum membuka kunci agar database GAS selesai menulis
+      // Delay visual agar user tahu ada proses 'sinkronisasi'
       setTimeout(() => {
         setIsSaving(false);
         isSavingRef.current = false;
-      }, 3000);
+      }, 2000);
     }
   };
 
@@ -205,7 +206,7 @@ const App: React.FC = () => {
             <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
           </div>
         </div>
-        <h2 className="text-slate-800 font-black text-xs uppercase tracking-[0.2em] mb-3">Menghubungkan ke Cloud</h2>
+        <h2 className="text-slate-800 font-black text-xs uppercase tracking-[0.2em] mb-3">Memuat Sistem</h2>
         <div className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-full">
           <Database size={12} className="text-slate-400" />
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest leading-none italic">SIAP GURU SMPN 3 PACET</p>
@@ -220,7 +221,7 @@ const App: React.FC = () => {
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000]">
           <div className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-slate-800 animate-in fade-in zoom-in duration-300">
             <RefreshCw size={14} className="text-indigo-400 animate-spin" />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sinkronisasi Awan...</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sinkronisasi...</span>
           </div>
         </div>
       )}

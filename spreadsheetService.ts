@@ -1,7 +1,7 @@
 /**
  * LAYANAN GOOGLE SPREADSHEET
  * 
- * Versi Sinkronisasi Handal (Anti-CORS False Alarms)
+ * Versi Ultra-Handal (Simple POST Method)
  */
 
 const SCRIPT_URL: string = "https://script.google.com/macros/s/AKfycbzDANrhGzWTVLqEHzmqOKPCWZOUVHJqbK2Y3SbDq3WAbRbukHfTTnCkHwvvIIBX9CpU/exec";
@@ -16,12 +16,11 @@ export const spreadsheetService = {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       const cacheBuster = `&_t=${Date.now()}`;
       const response = await fetch(`${SCRIPT_URL}?action=getAll${cacheBuster}`, {
         method: 'GET',
-        // GET harus tetap CORS agar kita bisa membaca data JSON-nya
         mode: 'cors',
         signal: controller.signal,
       });
@@ -39,30 +38,26 @@ export const spreadsheetService = {
   },
 
   /**
-   * Mengirim data ke GAS.
-   * MENGGUNAKAN no-cors:
-   * Google Apps Script sering mengembalikan 302 Redirect setelah POST.
-   * Fetch standar (CORS) akan menganggap redirect tanpa header CORS sebagai error.
-   * 'no-cors' akan mengirim data secara "fire and forget".
+   * Mengirim data ke GAS dengan metode 'Simple Request'.
+   * Menghapus header custom agar tidak memicu CORS preflight.
    */
   async postData(payload: any) {
     if (!isSpreadsheetConfigured) return false;
 
     try {
+      // Kita kirim sebagai string murni tanpa header Content-Type
+      // GAS tetap bisa membacanya lewat e.postData.contents
       await fetch(SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors', // Menghindari pengecekan CORS pada redirect
-        headers: {
-          'Content-Type': 'text/plain',
-        },
+        mode: 'no-cors', // Sangat penting untuk Google Apps Script
         body: JSON.stringify(payload)
       });
 
-      // Dalam mode no-cors, kita tidak bisa membaca response.ok.
-      // Jika fetch tidak melempar error (throw), kita asumsikan permintaan terkirim.
+      // Dalam mode no-cors, kita tidak bisa tahu status aslinya.
+      // Kita asumsikan terkirim jika tidak ada error jaringan fatal.
       return true;
     } catch (error) {
-      console.error("Network Error (Real):", error);
+      console.error("POST Network Error:", error);
       return false; 
     }
   },
