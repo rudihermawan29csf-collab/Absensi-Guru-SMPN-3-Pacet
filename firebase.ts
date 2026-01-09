@@ -1,2 +1,2 @@
-// File ini telah dihapus karena aplikasi beralih menggunakan Google Spreadsheet sebagai database.
-// Silakan gunakan spreadsheetService.ts sebagai pengganti.
+// File ini sudah tidak digunakan. Aplikasi telah beralih menggunakan Supabase.
+export {};

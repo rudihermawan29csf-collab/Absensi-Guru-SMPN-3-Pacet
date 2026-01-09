@@ -1,5 +1,7 @@
+
 import React, { useState, useMemo, useRef } from 'react';
-import { AttendanceRecord, AttendanceStatus, Teacher, AppSettings, SchoolEvent, ScheduleEntry } from '../types';
+// Fix: Correct path to types.ts in same directory
+import { AttendanceRecord, AttendanceStatus, Teacher, AppSettings, SchoolEvent, ScheduleEntry } from './types';
 import { CLASSES, CLASS_COLORS, NOTE_CHOICES, MAPEL_NAME_MAP, TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE } from '../constants';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -8,17 +10,19 @@ import {
 import { 
   Users, LayoutGrid, Edit2, Trash2, Calendar, 
   Activity, Settings, ShieldCheck, BookOpen, Plus, Download, Upload, Trash, X, 
-  AlertTriangle, Save, CheckCircle2, Clock, Check, RefreshCw
+  AlertTriangle, Save, CheckCircle2, Clock, Check, RefreshCw, Sparkles, Loader2
 } from 'lucide-react';
+// Fix: Import GoogleGenAI as per SDK guidelines to enable intelligent insights
+import {GoogleGenAI} from "@google/genai";
 
 interface AdminDashboardProps {
   data: AttendanceRecord[];
   teachers: Teacher[];
-  setTeachers: React.Dispatch<React.SetStateAction<Teacher[]>>;
+  setTeachers: (val: Teacher[] | ((prev: Teacher[]) => Teacher[])) => void;
   schedule: ScheduleEntry[];
-  setSchedule: React.Dispatch<React.SetStateAction<ScheduleEntry[]>>;
+  setSchedule: (val: ScheduleEntry[] | ((prev: ScheduleEntry[]) => ScheduleEntry[])) => void;
   settings: AppSettings;
-  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+  setSettings: (val: AppSettings | ((prev: AppSettings) => AppSettings)) => void;
   onSaveAttendance: (records: AttendanceRecord[]) => void;
 }
 
@@ -30,6 +34,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [timeFilter, setTimeFilter] = useState<'harian' | 'mingguan' | 'bulanan'>('harian');
   const [isRestoring, setIsRestoring] = useState(false);
+  
+  // AI Insights State
+  const [aiInsight, setAiInsight] = useState<string>('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   // Form States
   const [permitForm, setPermitForm] = useState({ 
@@ -65,7 +73,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!permitForm.id_guru || !permitForm.tanggal || !Array.isArray(schedule)) return [];
     const day = getDayFromDate(permitForm.tanggal);
     
-    // Cari di schedule semua jam di mana guru ini mengajar
     return schedule
       .filter(s => s.hari === day && s.kegiatan === 'KBM')
       .filter(s => {
@@ -74,7 +81,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       .map(s => s.jam);
   }, [permitForm.id_guru, permitForm.tanggal, schedule]);
 
-  // Logic: Ambil Seluruh Jam Pelajaran di hari tertentu (untuk Agenda Jam Khusus)
+  // Logic: Ambil Seluruh Jam Pelajaran di hari tertentu
   const allJamsOnDay = useMemo(() => {
     if (!eventForm.tanggal || !Array.isArray(schedule)) return [];
     const day = getDayFromDate(eventForm.tanggal);
@@ -82,6 +89,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       .filter(s => s.hari === day && s.kegiatan === 'KBM')
       .map(s => s.jam);
   }, [eventForm.tanggal, schedule]);
+
+  // Fix: Added Gemini-powered AI Analysis to provide executive summaries of attendance
+  const handleGenerateAiInsight = async () => {
+    setIsAnalyzing(true);
+    try {
+      // Create a new GoogleGenAI instance right before making an API call to ensure it uses the latest key
+      const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
+      // Using gemini-3-flash-preview as recommended for basic summarization and data analysis tasks
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Berikan ringkasan eksekutif profesional dalam Bahasa Indonesia mengenai data absensi SMPN 3 Pacet hari ini (${todayStr}). Statistik: Hadir ${stats.hadir} jam, Izin/Sakit ${stats.izin} jam, Tanpa Keterangan ${stats.alpha} jam. Berikan saran jika ada tingkat alpha yang tinggi atau kelas yang kosong.`,
+      });
+      // Accessing .text as a property, as per guidelines
+      setAiInsight(response.text || 'Gagal memperoleh analisa cerdas.');
+    } catch (err) {
+      console.error("AI Insight Error:", err);
+      setAiInsight('Layanan analisa AI sedang tidak tersedia.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   // Action: Simpan Izin Guru
   const handleSavePermit = (e: React.FormEvent) => {
@@ -123,7 +151,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     });
 
     onSaveAttendance(newRecords);
-    alert('Status izin guru berhasil diterapkan pada jam terpilih.');
+    alert('Status izin guru berhasil diterapkan.');
     setPermitForm({ ...permitForm, jam: [], catatan: '' });
   };
 
@@ -137,7 +165,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       tanggal: eventForm.tanggal as string,
       affected_jams: eventForm.tipe === 'JAM_KHUSUS' ? eventForm.affected_jams : []
     };
-    setSettings({ ...settings, events: [...(settings.events || []), newEvent] });
+    setSettings(prev => ({ ...prev, events: [...(prev.events || []), newEvent] }));
     setEventForm({ nama: '', tipe: 'KEGIATAN', tanggal: todayStr, affected_jams: [] });
     alert('Agenda berhasil disimpan.');
   };
@@ -146,25 +174,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     if (!teacherForm.id || !teacherForm.nama) return;
     const teacherData = teacherForm as Teacher;
-    if (editingTeacherId) {
-      setTeachers(prev => prev.map(t => t.id === editingTeacherId ? teacherData : t));
-    } else {
-      setTeachers(prev => [...prev, teacherData]);
-    }
+    setTeachers(prev => {
+      if (editingTeacherId) {
+        return prev.map(t => t.id === editingTeacherId ? teacherData : t);
+      }
+      return [...prev, teacherData];
+    });
     setIsTeacherModalOpen(false);
     setTeacherForm({ id: '', nama: '', mapel: [] });
     setEditingTeacherId(null);
   };
 
   const handleRestoreDefaults = async () => {
-    if (!confirm('Tindakan ini akan mengunggah Jadwal dan Data Guru bawaan ke Cloud. Lanjutkan?')) return;
-    
+    if (!confirm('Pindahkan data bawaan sekolah ke Cloud?')) return;
     setIsRestoring(true);
     try {
       setTeachers(INITIAL_TEACHERS);
       setSchedule(INITIAL_SCHEDULE);
-      // Data akan otomatis tersinkron ke cloud via handleUpdateConfig di App.tsx
-      alert('Data bawaan berhasil dipulihkan.');
+      alert('Data bawaan berhasil dimuat ulang.');
     } catch (err) {
       alert('Gagal memulihkan data.');
     } finally {
@@ -235,6 +262,49 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               ))}
            </div>
            
+           {/* Fix: Added intelligent AI summary section to provide automated executive reporting */}
+           <div className="bg-indigo-900 rounded-[40px] p-8 lg:p-10 text-white shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-12 opacity-10">
+                 <Sparkles size={160} />
+              </div>
+              <div className="relative z-10">
+                 <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                       <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-md">
+                          <Sparkles size={20} className="text-indigo-200" />
+                       </div>
+                       <h3 className="text-sm font-black uppercase italic tracking-widest leading-none">SIAP AI Insights</h3>
+                    </div>
+                    <button 
+                       onClick={handleGenerateAiInsight}
+                       disabled={isAnalyzing}
+                       className="bg-white text-indigo-900 px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 transition-all flex items-center gap-2 shadow-xl shadow-indigo-950/20"
+                    >
+                       {isAnalyzing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                       {aiInsight ? 'Update Ringkasan' : 'Hasilkan Analisa'}
+                    </button>
+                 </div>
+
+                 {!aiInsight && !isAnalyzing ? (
+                    <div className="py-10 text-center border-2 border-dashed border-white/20 rounded-3xl">
+                       <p className="text-indigo-200 font-bold text-xs uppercase tracking-widest italic">Belum ada analisa untuk hari ini.</p>
+                    </div>
+                 ) : isAnalyzing ? (
+                    <div className="py-10 flex flex-col items-center gap-4">
+                       <Loader2 size={40} className="animate-spin text-indigo-300" />
+                       <p className="text-indigo-200 font-bold text-xs uppercase tracking-widest animate-pulse">Menghubungkan ke Gemini 3 Flash...</p>
+                    </div>
+                 ) : (
+                    <div className="bg-white/10 backdrop-blur-md rounded-3xl p-6 border border-white/10 animate-in fade-in slide-in-from-bottom-4">
+                       <p className="text-sm font-medium leading-relaxed text-indigo-50 italic">"{aiInsight}"</p>
+                       <div className="mt-4 flex items-center gap-2 text-[10px] font-black uppercase text-indigo-300">
+                          <CheckCircle2 size={12} /> Powered by Gemini AI
+                       </div>
+                    </div>
+                 )}
+              </div>
+           </div>
+
            <div className="bg-white p-8 lg:p-10 rounded-[40px] border border-slate-100 shadow-2xl">
               <h3 className="text-sm font-black text-slate-800 uppercase italic mb-8 flex items-center gap-3"><Activity size={20} className="text-indigo-600"/> Rekapitulasi Kehadiran</h3>
               <div className="h-72">
@@ -258,7 +328,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'monitoring' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-in fade-in">
            {CLASSES.map(c => {
-              const classRecs = (data || []).filter(r => r.tanggal === todayStr && r.id_kelas === c.id);
+              const classRecs = (data || [])
+                .filter(r => r.tanggal === todayStr && r.id_kelas === c.id)
+                .sort((a, b) => parseInt(a.jam) - parseInt(b.jam));
+                
               const lastRec = classRecs[classRecs.length - 1];
               const isHadir = lastRec?.status === AttendanceStatus.HADIR;
               return (
@@ -434,7 +507,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                            </div>
                         </div>
                      </div>
-                     <button onClick={() => setSettings({...settings, events: settings.events.filter(x => x.id !== ev.id)})} className="p-3 text-slate-200 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"><Trash2 size={20}/></button>
+                     <button onClick={() => setSettings(prev => ({...prev, events: prev.events.filter(x => x.id !== ev.id)}))} className="p-3 text-slate-200 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"><Trash2 size={20}/></button>
                   </div>
                 ))
               )}
@@ -539,13 +612,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="space-y-6">
                  <div>
                     <label className="text-[10px] font-black text-slate-500 mb-2 block uppercase tracking-widest">Tahun Pelajaran</label>
-                    <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-indigo-500/20" value={settings.tahunPelajaran} onChange={e => setSettings({...settings, tahunPelajaran: e.target.value})}/>
+                    <input className="w-full bg-slate-50 border border-slate-100 px-5 py-4 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-indigo-500/20" value={settings.tahunPelajaran} onChange={e => setSettings(prev => ({...prev, tahunPelajaran: e.target.value}))}/>
                  </div>
                  <div>
                     <label className="text-[10px] font-black text-slate-500 mb-2 block uppercase tracking-widest">Semester</label>
                     <div className="grid grid-cols-2 gap-3">
                        {['Ganjil', 'Genap'].map(s => (
-                          <button key={s} onClick={() => setSettings({...settings, semester: s as any})} className={`py-4 rounded-2xl text-xs font-black uppercase border transition-all ${settings.semester === s ? 'bg-indigo-600 text-white border-indigo-700 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100 hover:text-indigo-500'}`}>{s}</button>
+                          <button key={s} onClick={() => setSettings(prev => ({...prev, semester: s as any}))} className={`py-4 rounded-2xl text-xs font-black uppercase border transition-all ${settings.semester === s ? 'bg-indigo-600 text-white border-indigo-700 shadow-lg' : 'bg-slate-50 text-slate-400 border-slate-100 hover:text-indigo-500'}`}>{s}</button>
                        ))}
                     </div>
                  </div>

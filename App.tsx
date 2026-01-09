@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { spreadsheetService, isSpreadsheetConfigured } from './spreadsheetService';
+import { supabase, subscribeToTable } from './supabase';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import GuruDashboard from './pages/GuruDashboard';
 import KetuaKelasDashboard from './pages/KetuaKelasDashboard';
 import AttendanceForm from './pages/AttendanceForm';
 import Layout from './components/Layout';
-import { User, UserRole, AttendanceRecord, Teacher, AppSettings, ScheduleEntry } from './types';
+import { User, UserRole, AttendanceRecord, Teacher, AppSettings, ScheduleEntry } from './pages/types';
 import { TEACHERS as INITIAL_TEACHERS, SCHEDULE as INITIAL_SCHEDULE } from './constants';
-import { WifiOff, Loader2, Database, AlertCircle, RefreshCw, Cloud } from 'lucide-react';
+import { Loader2, Database } from 'lucide-react';
 
 const DEFAULT_SETTINGS: AppSettings = {
   tahunPelajaran: '2025/2026',
@@ -18,150 +18,70 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const App: React.FC = () => {
-  const isSavingRef = useRef(false);
-
   const [user, setUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('spn3_user');
       return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   });
 
-  // State inisialisasi dari localStorage (Jangkar Utama)
-  const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>(() => {
-    try {
-      const cached = localStorage.getItem('spn3_cached_data');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return Array.isArray(parsed.attendance) ? parsed.attendance : [];
-      }
-      return [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [teachers, setTeachers] = useState<Teacher[]>(() => {
-    try {
-      const cached = localStorage.getItem('spn3_cached_data');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return Array.isArray(parsed.teachers) && parsed.teachers.length > 0 ? parsed.teachers : INITIAL_TEACHERS;
-      }
-      return INITIAL_TEACHERS;
-    } catch {
-      return INITIAL_TEACHERS;
-    }
-  });
-
-  const [schoolSchedule, setSchoolSchedule] = useState<ScheduleEntry[]>(() => {
-    try {
-      const cached = localStorage.getItem('spn3_cached_data');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return Array.isArray(parsed.schedule) && parsed.schedule.length > 0 ? parsed.schedule : INITIAL_SCHEDULE;
-      }
-      return INITIAL_SCHEDULE;
-    } catch {
-      return INITIAL_SCHEDULE;
-    }
-  });
-
-  const [settings, setSettings] = useState<AppSettings>(() => {
-    try {
-      const cached = localStorage.getItem('spn3_cached_data');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        return parsed.settings || DEFAULT_SETTINGS;
-      }
-      return DEFAULT_SETTINGS;
-    } catch {
-      return DEFAULT_SETTINGS;
-    }
-  });
+  const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>(INITIAL_TEACHERS);
+  const [schoolSchedule, setSchoolSchedule] = useState<ScheduleEntry[]>(INITIAL_SCHEDULE);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [lastSync, setLastSync] = useState<Date | null>(null);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'offline' | 'error'>('synced');
+  const [lastSync, setLastSync] = useState<Date | null>(null);
 
-  /**
-   * SMART MERGE LOGIC
-   * Menggabungkan data dari Cloud tanpa menghapus data lokal yang belum tersinkron.
-   */
-  const mergeData = (local: AttendanceRecord[], cloud: AttendanceRecord[]) => {
-    const merged = [...cloud];
-    const cloudIds = new Set(cloud.map(item => item.id));
-    
-    // Tambahkan data lokal yang TIDAK ada di cloud (berarti baru/belum sinkron)
-    local.forEach(localItem => {
-      if (!cloudIds.has(localItem.id)) {
-        merged.push(localItem);
-      }
-    });
+  // Inisialisasi Data dari Supabase
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
+      try {
+        const [
+          { data: attData }, 
+          { data: teachData }, 
+          { data: schedData }, 
+          { data: configData }
+        ] = await Promise.all([
+          supabase.from('attendance').select('*'),
+          supabase.from('teachers').select('*'),
+          supabase.from('schedule').select('*'),
+          supabase.from('config').select('*').eq('id', 'settings').single()
+        ]);
 
-    // Urutkan berdasarkan tanggal dan jam agar tampilan tetap rapi
-    return merged.sort((a, b) => {
-      const dateCompare = b.tanggal.localeCompare(a.tanggal);
-      if (dateCompare !== 0) return dateCompare;
-      return b.jam.localeCompare(a.jam);
-    });
-  };
+        if (attData) setAttendanceData(attData);
+        if (teachData && teachData.length > 0) setTeachers(teachData);
+        if (schedData && schedData.length > 0) setSchoolSchedule(schedData);
+        if (configData) setSettings(configData.data as AppSettings);
 
-  const loadData = useCallback(async (isManual = false) => {
-    // Jika sedang menyimpan, jangan tarik data agar tidak bentrok
-    if (isSavingRef.current) return;
-    
-    if (!isSpreadsheetConfigured) {
-      setIsLoading(false);
-      return;
-    }
-
-    if (isManual) setSyncStatus('offline'); 
-    else setIsLoading(true);
-
-    try {
-      const result = await spreadsheetService.getAllData();
-      
-      if (result && typeof result === 'object' && !isSavingRef.current) {
-        // Ambil data lokal saat ini untuk perbandingan
-        const currentLocalData = JSON.parse(localStorage.getItem('spn3_cached_data') || '{}').attendance || [];
-        
-        // 1. SMART MERGE ATTENDANCE (Mencegah data hilang)
-        if (Array.isArray(result.attendance)) {
-          const finalAttendance = mergeData(currentLocalData, result.attendance);
-          setAttendanceData(finalAttendance);
-        }
-
-        // 2. Update Configs
-        if (Array.isArray(result.teachers) && result.teachers.length > 0) setTeachers(result.teachers);
-        if (Array.isArray(result.schedule) && result.schedule.length > 0) setSchoolSchedule(result.schedule);
-        if (result.settings) setSettings(result.settings);
-        
         setLastSync(new Date());
         setSyncStatus('synced');
-        
-        // Simpan hasil merge ke cache
-        localStorage.setItem('spn3_cached_data', JSON.stringify({
-          ...result,
-          attendance: mergeData(currentLocalData, result.attendance || [])
-        }));
+      } catch (error) {
+        console.error("Supabase Init Error:", error);
+        setSyncStatus('error');
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      console.warn("Sinkronisasi gagal, mempertahankan data lokal.");
-      setSyncStatus('error');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+    };
 
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(() => loadData(true), 10 * 60 * 1000); // 10 menit sekali saja
-    return () => clearInterval(interval);
-  }, [loadData]);
+    fetchData();
+
+    // Subscribe Real-time
+    const channelAtt = subscribeToTable('attendance', () => fetchData());
+    const channelTeach = subscribeToTable('teachers', () => fetchData());
+    const channelSched = subscribeToTable('schedule', () => fetchData());
+    const channelConfig = subscribeToTable('config', () => fetchData());
+
+    return () => {
+      supabase.removeChannel(channelAtt);
+      supabase.removeChannel(channelTeach);
+      supabase.removeChannel(channelSched);
+      supabase.removeChannel(channelConfig);
+    };
+  }, []);
 
   const handleLogin = (newUser: User) => {
     setUser(newUser);
@@ -173,63 +93,35 @@ const App: React.FC = () => {
     localStorage.removeItem('spn3_user');
   };
 
+  // Simpan Data Absensi ke Supabase
   const saveAttendanceBulk = async (newRecords: AttendanceRecord[]) => {
     setIsSaving(true);
-    isSavingRef.current = true;
-    
-    // 1. Update state lokal + cache segera
-    let updatedAttendance: AttendanceRecord[] = [];
-    setAttendanceData(prev => {
-      const updated = [...prev];
-      newRecords.forEach(rec => {
-        const idx = updated.findIndex(a => a.id === rec.id);
-        if (idx > -1) updated[idx] = rec;
-        else updated.push(rec);
-      });
-      updatedAttendance = updated;
-      return updated;
-    });
-
-    const currentCache = JSON.parse(localStorage.getItem('spn3_cached_data') || '{}');
-    localStorage.setItem('spn3_cached_data', JSON.stringify({
-      ...currentCache,
-      attendance: updatedAttendance
-    }));
-
-    // 2. Kirim ke cloud
     try {
-      const success = await spreadsheetService.saveAttendance(newRecords);
-      if (success) {
-        setSyncStatus('synced');
-        setLastSync(new Date());
-      } else {
-        setSyncStatus('offline');
-      }
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(newRecords);
+      
+      if (error) throw error;
+      setSyncStatus('synced');
     } catch (error) {
-      setSyncStatus('offline');
+      console.error("Save Error:", error);
+      setSyncStatus('error');
+      throw error;
     } finally {
-      // BERI JEDA 3 DETIK sebelum mengizinkan penarikan data cloud kembali
-      // Ini krusial agar server Google punya waktu untuk memproses data baru tersebut
-      setTimeout(() => {
-        setIsSaving(false);
-        isSavingRef.current = false;
-      }, 3000);
+      setIsSaving(false);
     }
   };
 
+  // Update Config di Supabase
   const handleUpdateConfig = async (type: 'teachers' | 'schedule' | 'settings', newData: any) => {
-    if (type === 'teachers') setTeachers(newData);
-    if (type === 'schedule') setSchoolSchedule(newData);
-    if (type === 'settings') setSettings(newData);
-
-    const currentCache = JSON.parse(localStorage.getItem('spn3_cached_data') || '{}');
-    localStorage.setItem('spn3_cached_data', JSON.stringify({
-      ...currentCache,
-      [type]: newData
-    }));
-
-    if (isSpreadsheetConfigured) {
-      await spreadsheetService.updateConfig(type, newData);
+    try {
+      if (type === 'settings') {
+        await supabase.from('config').upsert({ id: 'settings', data: newData });
+      } else {
+        await supabase.from(type).upsert(newData);
+      }
+    } catch (error) {
+      console.error("Config Update Error:", error);
     }
   };
 
@@ -242,7 +134,7 @@ const App: React.FC = () => {
             <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
           </div>
         </div>
-        <h2 className="text-slate-800 font-black text-xs uppercase tracking-[0.2em] mb-3">Menghubungkan Database</h2>
+        <h2 className="text-slate-800 font-black text-xs uppercase tracking-[0.2em] mb-3">Menghubungkan Supabase Cloud</h2>
         <div className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-full">
           <Database size={12} className="text-slate-400" />
           <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest leading-none italic">SIAP GURU SMPN 3 PACET</p>
@@ -256,8 +148,8 @@ const App: React.FC = () => {
       {isSaving && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[10000]">
           <div className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 border border-slate-800 animate-in fade-in zoom-in duration-300">
-            <RefreshCw size={14} className="text-indigo-400 animate-spin" />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Mengamankan Data...</span>
+            <Loader2 size={14} className="text-indigo-400 animate-spin" />
+            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Sinkronisasi Supabase...</span>
           </div>
         </div>
       )}
@@ -271,7 +163,7 @@ const App: React.FC = () => {
             onLogout={handleLogout} 
             syncStatus={syncStatus} 
             lastSync={lastSync}
-            onRefresh={() => loadData(true)}
+            onRefresh={() => window.location.reload()} 
           />
         ) : <Navigate to="/login" />}>
           <Route index element={

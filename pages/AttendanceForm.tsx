@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from '../types';
+
+import React, { useState, useEffect, useRef } from 'react';
+// Fix: Correct path to types.ts
+import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from './types';
 import { NOTE_CHOICES, MAPEL_NAME_MAP } from '../constants';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Calendar, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Save, Calendar, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
 
 interface AttendanceFormProps {
   user: User;
@@ -28,75 +30,105 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [dayName, setDayName] = useState('');
   const [blocks, setBlocks] = useState<BlockEntry[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Ref untuk menandai apakah kita sudah memuat data awal untuk tanggal yang dipilih
+  const lastLoadedRef = useRef<string>("");
+
   const todayEvent = (settings?.events || []).find(e => e.tanggal === date);
   const isHoliday = todayEvent?.tipe === 'LIBUR' || todayEvent?.tipe === 'KEGIATAN';
 
+  // Logika pemuatan data: Hanya dipicu jika Tanggal berubah atau Data Absensi dari Cloud berubah (tapi hanya jika form masih bersih)
   useEffect(() => {
     const d = new Date(date);
     const dayNames = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUM\'AT', 'SABTU'];
     const selectedDay = dayNames[d.getDay()];
     setDayName(selectedDay);
 
-    const safeAttendanceData = Array.isArray(attendanceData) ? attendanceData : [];
-    const existingForDate = safeAttendanceData.filter(a => a.tanggal === date && a.id_kelas === user.kelas);
+    const loadKey = `${date}-${user.kelas}`;
+    
+    // Kita muat data hanya jika tanggal/kelas berubah
+    // atau jika data awal belum pernah dimuat
+    if (lastLoadedRef.current !== loadKey) {
+      const safeAttendanceData = Array.isArray(attendanceData) ? attendanceData : [];
+      const existingForDate = safeAttendanceData.filter(a => a.tanggal === date && a.id_kelas === user.kelas);
 
-    if (user.kelas && !isHoliday && Array.isArray(schedule)) {
-      let daySchedule = schedule.filter(s => s.hari === selectedDay && s.mapping && s.mapping[user.kelas || ''] && s.kegiatan === 'KBM');
-      
-      if (todayEvent?.tipe === 'JAM_KHUSUS' && Array.isArray(todayEvent.affected_jams)) {
-        daySchedule = daySchedule.filter(s => !todayEvent.affected_jams?.includes(s.jam));
-      }
-
-      const groupedBlocks: BlockEntry[] = [];
-      let currentBlock: null | BlockEntry = null;
-
-      daySchedule.forEach((s) => {
-        const mappingValue = s.mapping[user.kelas || ''];
-        if (!mappingValue || !mappingValue.includes('-')) return;
-
-        const [mapelShort, teacherId] = mappingValue.split('-');
-        const teacher = (teachers || []).find(t => t.id === teacherId);
-        const fullMapel = MAPEL_NAME_MAP[mapelShort] || mapelShort;
+      if (user.kelas && !isHoliday && Array.isArray(schedule)) {
+        let daySchedule = schedule.filter(s => s.hari === selectedDay && s.mapping && s.mapping[user.kelas || ''] && s.kegiatan === 'KBM');
         
-        const adminEntry = safeAttendanceData.find(a => a.tanggal === date && a.id_guru === teacherId && a.is_admin_input);
-        const existingRecord = existingForDate.find(e => e.jam === s.jam);
-
-        if (currentBlock && currentBlock.id_guru === teacherId && currentBlock.mapel === fullMapel && currentBlock.isAdminControlled === !!adminEntry) {
-          currentBlock.jams.push(s.jam);
-        } else {
-          currentBlock = {
-            jams: [s.jam],
-            id_guru: teacherId,
-            nama_guru: teacher?.nama || teacherId,
-            mapel: fullMapel,
-            status: adminEntry ? adminEntry.status : (existingRecord ? existingRecord.status : AttendanceStatus.HADIR),
-            catatan: adminEntry ? adminEntry.catatan || '' : (existingRecord ? existingRecord.catatan || 'Hadir tepat waktu' : 'Hadir tepat waktu'),
-            isAdminControlled: !!adminEntry
-          };
-          groupedBlocks.push(currentBlock);
+        if (todayEvent?.tipe === 'JAM_KHUSUS' && Array.isArray(todayEvent.affected_jams)) {
+          daySchedule = daySchedule.filter(s => !todayEvent.affected_jams?.includes(s.jam));
         }
-      });
-      setBlocks(groupedBlocks);
-    } else setBlocks([]);
+
+        const groupedBlocks: BlockEntry[] = [];
+        let currentBlock: null | BlockEntry = null;
+
+        daySchedule.forEach((s) => {
+          const mappingValue = s.mapping[user.kelas || ''];
+          if (!mappingValue || !mappingValue.includes('-')) return;
+
+          const [mapelShort, teacherId] = mappingValue.split('-');
+          const teacher = (teachers || []).find(t => t.id === teacherId);
+          const fullMapel = MAPEL_NAME_MAP[mapelShort] || mapelShort;
+          
+          const adminEntry = safeAttendanceData.find(a => a.tanggal === date && a.id_guru === teacherId && a.is_admin_input);
+          const existingRecord = existingForDate.find(e => e.jam === s.jam);
+
+          if (currentBlock && currentBlock.id_guru === teacherId && currentBlock.mapel === fullMapel && currentBlock.isAdminControlled === !!adminEntry) {
+            currentBlock.jams.push(s.jam);
+          } else {
+            currentBlock = {
+              jams: [s.jam],
+              id_guru: teacherId,
+              nama_guru: teacher?.nama || teacherId,
+              mapel: fullMapel,
+              status: adminEntry ? adminEntry.status : (existingRecord ? existingRecord.status : AttendanceStatus.HADIR),
+              catatan: adminEntry ? adminEntry.catatan || '' : (existingRecord ? existingRecord.catatan || 'Hadir tepat waktu' : 'Hadir tepat waktu'),
+              isAdminControlled: !!adminEntry
+            };
+            groupedBlocks.push(currentBlock);
+          }
+        });
+        setBlocks(groupedBlocks);
+        lastLoadedRef.current = loadKey;
+      } else {
+        setBlocks([]);
+      }
+    }
   }, [date, user.kelas, teachers, attendanceData, settings, isHoliday, schedule]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (blocks.length === 0) return;
-    const recordsToSave: AttendanceRecord[] = [];
-    blocks.forEach(block => {
-      block.jams.forEach(jam => {
-        recordsToSave.push({
-          id: `${date}-${user.kelas}-${jam}`,
-          id_guru: block.id_guru, nama_guru: block.nama_guru, mapel: block.mapel, id_kelas: user.kelas || '',
-          tanggal: date, jam: jam, status: block.status, catatan: block.catatan, is_admin_input: block.isAdminControlled
+    if (blocks.length === 0 || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      const recordsToSave: AttendanceRecord[] = [];
+      blocks.forEach(block => {
+        block.jams.forEach(jam => {
+          recordsToSave.push({
+            id: `${date}-${user.kelas}-${jam}`,
+            id_guru: block.id_guru, 
+            nama_guru: block.nama_guru, 
+            mapel: block.mapel, 
+            id_kelas: user.kelas || '',
+            tanggal: date, 
+            jam: jam, 
+            status: block.status, 
+            catatan: block.catatan, 
+            is_admin_input: block.isAdminControlled
+          });
         });
       });
-    });
-    onSave(recordsToSave);
-    alert('Laporan berhasil disimpan!');
-    navigate('/');
+      
+      await onSave(recordsToSave);
+      alert('Laporan berhasil disimpan ke Cloud!');
+      navigate('/');
+    } catch (err) {
+      alert('Gagal menyimpan. Periksa koneksi internet Anda.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getStatusColor = (status: AttendanceStatus, isActive: boolean) => {
@@ -118,7 +150,10 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
           <div><h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Input Absensi</h1><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{dayName} • KELAS {user.kelas}</p></div>
         </div>
         <div className="bg-white px-6 py-4 rounded-[22px] border border-slate-100 flex items-center gap-4 shadow-xl">
-           <Calendar className="text-indigo-600" size={20} /><input type="date" className="outline-none text-[11px] font-black text-slate-800 bg-transparent uppercase" value={date} onChange={(e) => setDate(e.target.value)}/>
+           <Calendar className="text-indigo-600" size={20} /><input type="date" className="outline-none text-[11px] font-black text-slate-800 bg-transparent uppercase" value={date} onChange={(e) => {
+             setDate(e.target.value);
+             lastLoadedRef.current = ""; // Reset ref agar data baru dimuat
+           }}/>
         </div>
       </div>
 
@@ -144,22 +179,30 @@ const AttendanceForm: React.FC<AttendanceFormProps> = ({ user, onSave, attendanc
                    <div className="lg:col-span-7">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                          {Object.values(AttendanceStatus).map(s => (
-                           <button key={s} type="button" disabled={block.isAdminControlled} onClick={() => {
+                           <button key={s} type="button" disabled={block.isAdminControlled || isSubmitting} onClick={() => {
                                const nb = [...blocks]; nb[idx].status = s; setBlocks(nb);
                              }} className={`py-3.5 rounded-2xl text-[10px] font-black uppercase border transition-all ${getStatusColor(s, block.status === s)} ${block.isAdminControlled ? 'opacity-50' : ''}`}>{s}</button>
                          ))}
                       </div>
-                      <select disabled={block.isAdminControlled} className="w-full bg-slate-50 border border-slate-100 px-5 py-3.5 rounded-2xl text-xs font-bold outline-none" value={block.catatan} onChange={e => {
+                      <select disabled={block.isAdminControlled || isSubmitting} className="w-full bg-slate-50 border border-slate-100 px-5 py-3.5 rounded-2xl text-xs font-bold outline-none" value={block.catatan} onChange={e => {
                           const nb = [...blocks]; nb[idx].catatan = e.target.value; setBlocks(nb);
                         }}>
-                         {NOTE_CHOICES.map(n => <option key={n} value={n}>{n}</option>)}
+                         {/* Fix: Explicitly type n as string to resolve unknown type error */}
+                         {(NOTE_CHOICES as string[]).map((n: string) => <option key={n} value={n}>{n}</option>)}
                       </select>
                    </div>
                 </div>
              </div>
            ))}
-           <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-sm px-6 z-50">
-              <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-5 rounded-[22px] shadow-2xl flex items-center justify-center gap-4 uppercase tracking-widest text-[11px] transition-all"><Save size={20} /> Simpan Laporan</button>
+           <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-sm px-6 z-50">
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className={`w-full ${isSubmitting ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'} text-white font-black py-5 rounded-[22px] shadow-2xl flex items-center justify-center gap-4 uppercase tracking-widest text-[11px] transition-all`}
+              >
+                {isSubmitting ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />} 
+                {isSubmitting ? 'Menyimpan...' : 'Simpan Laporan'}
+              </button>
            </div>
         </form>
       ) : (

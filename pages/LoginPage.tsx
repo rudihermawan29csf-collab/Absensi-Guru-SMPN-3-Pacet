@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
-import { UserRole, User, Teacher } from '../types';
+// Fix: Correct path to types.ts in same directory
+import { UserRole, User, Teacher } from './types';
 import { CLASSES } from '../constants';
 import { School, AlertCircle, ShieldCheck, UserCircle, Users, Lock } from 'lucide-react';
 

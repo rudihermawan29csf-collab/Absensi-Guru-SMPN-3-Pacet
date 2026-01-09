@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
-import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings } from '../types';
+// Fix: Correct path to types.ts in same directory
+import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings } from './types';
 import { 
   CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, Legend

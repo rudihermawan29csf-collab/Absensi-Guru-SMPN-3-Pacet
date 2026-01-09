@@ -1,5 +1,6 @@
 
-import { ClassData, Teacher, ScheduleEntry } from './types';
+// Fix: Correct path to types.ts as it is located in the pages directory
+import { ClassData, Teacher, ScheduleEntry } from './pages/types';
 
 export const CLASSES: ClassData[] = [
   { id: '7A', nama: 'VII A' }, { id: '7B', nama: 'VII B' }, { id: '7C', nama: 'VII C' },
@@ -74,7 +75,8 @@ export const MAPEL_NAME_MAP: Record<string, string> = {
   'BIG': 'Bahasa Inggris'
 };
 
-export const NOTE_CHOICES = [
+// Fix: Explicitly type as string[] to ensure consumers don't infer as unknown[]
+export const NOTE_CHOICES: string[] = [
   "Hadir tepat waktu",
   "Memberi tugas via WA",
   "Tugas mandiri (LKS/Buku)",

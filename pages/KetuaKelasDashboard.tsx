@@ -1,5 +1,7 @@
+
 import React, { useState, useMemo } from 'react';
-import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from '../types';
+// Fix: Correct path to types.ts in same directory
+import { User, AttendanceRecord, AttendanceStatus, Teacher, AppSettings, ScheduleEntry } from './types';
 import { CLASSES, MAPEL_NAME_MAP, TEACHER_COLORS } from '../constants';
 import { Link } from 'react-router-dom';
 import { Plus, Coffee, Filter } from 'lucide-react';
