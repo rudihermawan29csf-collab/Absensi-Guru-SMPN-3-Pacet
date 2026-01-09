@@ -1,56 +1,64 @@
 import { createClient } from '@supabase/supabase-js';
 
-// URL proyek Supabase Anda
 const supabaseUrl = 'https://ohwhmcygyonwkfszcqgl.supabase.co';
-
-/**
- * Kunci API Supabase.
- * Mencoba mengambil dari variabel lingkungan yang tersedia.
- */
 const supabaseKey = process.env.SUPABASE_KEY || process.env.API_KEY || '';
 
-const createSafeClient = () => {
-  if (!supabaseKey) {
-    const errorMsg = "SIAP GURU: Supabase Key (anon) tidak ditemukan. Pastikan variabel lingkungan SUPABASE_KEY sudah diisi di dashboard AI Studio.";
-    console.error(errorMsg);
-    
-    // Proxy untuk mencegah crash saat startup, memberikan feedback saat dipanggil
-    return new Proxy({} as any, {
-      get: (target, prop) => {
-        if (prop === 'from') {
-          return () => ({
-            select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: null, error: { message: 'Missing API Key' } }) }), order: () => Promise.resolve({ data: [], error: null }) }),
-            upsert: () => Promise.resolve({ error: { message: 'Akses ditolak: API Key Supabase belum dikonfigurasi.' } }),
-            delete: () => Promise.resolve({ error: { message: 'Akses ditolak: API Key Supabase belum dikonfigurasi.' } })
-          });
-        }
-        if (prop === 'channel') return () => ({ on: () => ({ subscribe: () => ({}) }) });
-        return () => {};
-      }
-    });
-  }
+/**
+ * Mock Client yang mensimulasikan API Supabase menggunakan LocalStorage.
+ * Digunakan saat API Key belum dikonfigurasi agar aplikasi tetap fungsional.
+ */
+const createLocalStorageClient = () => {
+  console.warn("SIAP GURU: Menggunakan Mode Lokal (Penyimpanan Browser) karena API Key Cloud belum dikonfigurasi.");
   
-  try {
-    // Inisialisasi client standar
-    return createClient(supabaseUrl, supabaseKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true
-      }
-    });
-  } catch (err) {
-    console.error("Gagal menginisialisasi Supabase Client:", err);
-    return {} as any;
-  }
+  const mockFrom = (table: string) => ({
+    select: (query?: string) => {
+      const storageKey = `spn3_mock_${table}`;
+      const data = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      
+      const response = {
+        data,
+        error: null,
+        eq: (col: string, val: any) => ({
+          single: () => {
+            if (table === 'config') return { data: data.find((d: any) => d.id === val) || null, error: null };
+            return { data: data.find((d: any) => d[col] === val) || null, error: null };
+          }
+        }),
+        order: () => Promise.resolve({ data, error: null }),
+        // Memungkinkan pemanggilan langsung .then() atau await
+        then: (cb: any) => cb({ data, error: null })
+      };
+      return response;
+    },
+    upsert: (payload: any | any[]) => {
+      const storageKey = `spn3_mock_${table}`;
+      const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      const items = Array.isArray(payload) ? payload : [payload];
+      
+      items.forEach(item => {
+        const idField = table === 'config' ? 'id' : 'id';
+        const idx = existing.findIndex((e: any) => e[idField] === item[idField]);
+        if (idx >= 0) existing[idx] = { ...existing[idx], ...item };
+        else existing.push(item);
+      });
+      
+      localStorage.setItem(storageKey, JSON.stringify(existing));
+      return Promise.resolve({ data: items, error: null });
+    },
+    delete: (query: any) => Promise.resolve({ error: null })
+  });
+
+  return {
+    from: mockFrom,
+    channel: () => ({ on: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }) }),
+    isLocal: true // Penanda bahwa ini adalah mock
+  } as any;
 };
 
-export const supabase = createSafeClient();
+export const supabase = supabaseKey ? createClient(supabaseUrl, supabaseKey) : createLocalStorageClient();
 
-/**
- * Helper untuk Real-time subscription
- */
 export const subscribeToTable = (table: string, callback: (payload: any) => void) => {
-  if (!supabaseKey || !supabase.channel) return { unsubscribe: () => {} };
+  if (!supabaseKey || (supabase as any).isLocal) return { unsubscribe: () => {} };
   
   try {
     return supabase

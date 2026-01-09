@@ -1,7 +1,5 @@
-
 import React, { useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-// Fix: Correct path to types.ts
 import { User, UserRole } from '../pages/types';
 import { 
   LayoutDashboard, 
@@ -13,7 +11,7 @@ import {
   Cloud,
   RefreshCw,
   CloudOff,
-  AlertCircle
+  Database
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -47,7 +45,6 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, lastSync, o
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
           <div className="p-6 flex items-center gap-3 border-b border-slate-800">
@@ -100,7 +97,6 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, lastSync, o
         </div>
       </aside>
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
         <header className="bg-white h-16 flex items-center justify-between px-6 border-b border-slate-200 sticky top-0 z-40">
           <div className="flex items-center gap-4">
@@ -116,7 +112,6 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, lastSync, o
           </div>
 
           <div className="flex items-center gap-4">
-            {/* Sync Indicator */}
             <button 
               onClick={onRefresh}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-full transition-all border ${
@@ -124,22 +119,15 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, lastSync, o
                 syncStatus === 'offline' ? 'bg-amber-50 text-amber-600 border-amber-100' :
                 'bg-rose-50 text-rose-600 border-rose-100'
               }`}
-              title={lastSync ? `Sinkronisasi terakhir: ${lastSync.toLocaleTimeString()}` : 'Belum sinkron'}
             >
               {syncStatus === 'synced' ? <Cloud size={14} /> : 
-               syncStatus === 'offline' ? <RefreshCw size={14} className="animate-spin" /> :
+               syncStatus === 'offline' ? <Database size={14} /> :
                <CloudOff size={14} />}
               <span className="text-[10px] font-black uppercase tracking-widest hidden md:inline">
-                {syncStatus === 'synced' ? 'Cloud Synced' : 
-                 syncStatus === 'offline' ? 'Syncing...' : 'Sync Failed'}
+                {syncStatus === 'synced' ? 'Cloud Online' : 
+                 syncStatus === 'offline' ? 'Mode Lokal' : 'Gagal Sinkron'}
               </span>
             </button>
-
-            <div className="bg-slate-100 px-4 py-1.5 rounded-full border border-slate-200 hidden xs:block">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">
-                {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
-              </span>
-            </div>
           </div>
         </header>
 
@@ -150,7 +138,6 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, syncStatus, lastSync, o
         </main>
       </div>
 
-      {/* Mobile Overlay */}
       {isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
