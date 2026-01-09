@@ -1,78 +1,61 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = 'https://ohwhmcygyonwkfszcqgl.supabase.co';
+
+// Mengambil kunci dari environment variable
+// Pastikan variabel ini tersedia melalui sistem Secrets atau dialog pemilihan kunci
+const getApiKey = () => process.env.API_KEY || '';
 
 /**
- * ================================
- * KONFIGURASI SUPABASE
- * ================================
+ * Mock Client untuk mode fallback lokal (LocalStorage)
  */
-const SUPABASE_URL = 'https://ohwhmcygyonwkfszcqgl.supabase.co';
-
-/**
- * Ambil API Key dari Google Studio Secrets
- * Google Studio inject secrets ke global scope
- */
-const getSupabaseAnonKey = (): string => {
-  try {
-    // @ts-ignore
-    const key = (globalThis as any)?.SUPABASE_ANON_KEY;
-    return typeof key === 'string' ? key : '';
-  } catch {
-    return '';
-  }
+const createLocalStorageClient = () => {
+  return {
+    from: (table: string) => ({
+      select: () => ({
+        eq: (col: string, val: any) => ({
+          single: () => {
+            const data = JSON.parse(localStorage.getItem(`spn3_mock_${table}`) || '[]');
+            return { data: data.find((d: any) => (table === 'config' ? d.id === val : d[col] === val)) || null, error: null };
+          }
+        }),
+        order: () => Promise.resolve({ data: JSON.parse(localStorage.getItem(`spn3_mock_${table}`) || '[]'), error: null }),
+        then: (cb: any) => cb({ data: JSON.parse(localStorage.getItem(`spn3_mock_${table}`) || '[]'), error: null })
+      }),
+      upsert: (payload: any) => {
+        const storageKey = `spn3_mock_${table}`;
+        const existing = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        const items = Array.isArray(payload) ? payload : [payload];
+        items.forEach(item => {
+          const idx = existing.findIndex((e: any) => e.id === item.id);
+          if (idx >= 0) existing[idx] = { ...existing[idx], ...item };
+          else existing.push(item);
+        });
+        localStorage.setItem(storageKey, JSON.stringify(existing));
+        return Promise.resolve({ data: items, error: null });
+      },
+      delete: () => Promise.resolve({ error: null })
+    }),
+    channel: () => ({ on: () => ({ subscribe: () => ({ unsubscribe: () => {} }) }) }),
+    isLocal: true
+  } as any;
 };
 
-/**
- * ================================
- * VALIDASI MODE CLOUD
- * ================================
- * Mock DIMATIKAN agar tidak jatuh ke Local Mode
- */
-const anonKey = getSupabaseAnonKey();
+// Client Utama: Dibuat secara dinamis
+export const supabase = getApiKey() 
+  ? createClient(supabaseUrl, getApiKey()) 
+  : createLocalStorageClient();
 
-if (!anonKey) {
-  throw new Error(
-    'SUPABASE_ANON_KEY belum terhubung. ' +
-    'Pastikan sudah di-set di Google Studio → Project Settings → Secrets ' +
-    'dan aplikasi sudah di-Deploy.'
-  );
-}
-
-/**
- * ================================
- * CLIENT SUPABASE (LIVE)
- * ================================
- */
-export const supabase: SupabaseClient = createClient(
-  SUPABASE_URL,
-  anonKey,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true
-    }
-  }
-);
-
-/**
- * ================================
- * REALTIME SUBSCRIPTION
- * ================================
- */
-export const subscribeToTable = (
-  table: string,
-  callback: (payload: any) => void
-) => {
+export const subscribeToTable = (table: string, callback: (payload: any) => void) => {
+  const key = getApiKey();
+  if (!key || (supabase as any).isLocal) return { unsubscribe: () => {} };
+  
   try {
     return supabase
-      .channel(`realtime:${table}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table },
-        callback
-      )
+      .channel(`public:${table}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: table }, callback)
       .subscribe();
-  } catch (error) {
-    console.error('Realtime subscription error:', error);
+  } catch (e) {
     return { unsubscribe: () => {} };
   }
 };
